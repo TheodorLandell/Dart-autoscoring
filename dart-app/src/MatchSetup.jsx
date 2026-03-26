@@ -1,0 +1,864 @@
+import { useState, useRef } from "react";
+
+/*
+  ┌─────────────────────────────────────────────────────────────┐
+  │  MATCH SETUP — Allt på en sida + Throw for Bull            │
+  │                                                             │
+  │  SETUP-SIDAN (scrollbar):                                  │
+  │  ┌─────────────────────────────────────────────────────┐    │
+  │  │  1. SPELARVAL                                       │    │
+  │  │  - Inloggad spelare visas automatiskt               │    │
+  │  │  - Lägg till gäst (skriv namn)                      │    │
+  │  │  - Lägg till bot (välj snittnivå via slider)        │    │
+  │  │  - Obegränsat antal spelare                         │    │
+  │  │  - Drag för att ändra ordning (stretch goal)        │    │
+  │  │                                                      │    │
+  │  │  Bot-nivå:                                           │    │
+  │  │  - Slider 15-80 (snittpoäng per 3 pilar)           │    │
+  │  │  - 15-25: Nybörjare                                 │    │
+  │  │  - 26-40: Casual                                    │    │
+  │  │  - 41-55: Medel                                     │    │
+  │  │  - 56-70: Bra                                       │    │
+  │  │  - 71-80: Pro                                       │    │
+  │  │                                                      │    │
+  │  │  Backend:                                            │    │
+  │  │  - GET /api/user/profile → hämta inloggad spelare   │    │
+  │  │  - Bot-logik hanteras i backend vid gameplay         │    │
+  │  │    POST /api/game/bot-throw { avg_score, target }   │    │
+  │  ├─────────────────────────────────────────────────────┤    │
+  │  │  2. POÄNGVAL                                        │    │
+  │  │  - 501 / 301 / Custom (input)                       │    │
+  │  │  - Custom: valfritt tal, valideras > 0              │    │
+  │  │                                                      │    │
+  │  │  Backend: sparas i matchkonfiguration                │    │
+  │  ├─────────────────────────────────────────────────────┤    │
+  │  │  3. LEGS & FORMAT                                   │    │
+  │  │  - Antal legs: 1, 3, 5, 7 eller custom              │    │
+  │  │  - Format: "Först till X" eller "Bäst av X"        │    │
+  │  │                                                      │    │
+  │  │  Backend: matchstate-hantering, legs vunna/spelare  │    │
+  │  ├─────────────────────────────────────────────────────┤    │
+  │  │  4. STARTA MATCH → Throw for Bull                   │    │
+  │  └─────────────────────────────────────────────────────┘    │
+  │                                                             │
+  │  THROW FOR BULL (fullskärm):                               │
+  │  ┌─────────────────────────────────────────────────────┐    │
+  │  │  Dartboard-grafik (SVG)                             │    │
+  │  │  "Spelare X — Kasta din pil!"                       │    │
+  │  │  Klicka på tavlan för att placera pil               │    │
+  │  │  Bekräfta-knapp → nästa spelare                     │    │
+  │  │  När alla kastat → visa resultat + vem som börjar   │    │
+  │  │                                                      │    │
+  │  │  Systemet mäter avstånd till bull-centrum:          │    │
+  │  │  - Pil 1 = Spelare 1, Pil 2 = Spelare 2, osv.     │    │
+  │  │  - Närmast bull börjar kasta först i matchen        │    │
+  │  │                                                      │    │
+  │  │  Backend:                                            │    │
+  │  │  POST /api/game/match/create                        │    │
+  │  │  Body: { players, starting_score, legs, format,     │    │
+  │  │          throw_order (from bull result) }            │    │
+  │  │  I produktion: pilpositioner från DartVision         │    │
+  │  │  WebSocket: /ws/game/{match_id} för live-uppdatering│    │
+  │  └─────────────────────────────────────────────────────┘    │
+  └─────────────────────────────────────────────────────────────┘
+*/
+
+/* ============ HELPERS ============ */
+function getBotLabel(avg) {
+  if (avg <= 25) return "Nybörjare";
+  if (avg <= 40) return "Casual";
+  if (avg <= 55) return "Medel";
+  if (avg <= 70) return "Bra";
+  return "Pro";
+}
+
+function getBotColor(avg) {
+  if (avg <= 25) return "#10B981";
+  if (avg <= 40) return "#60A5FA";
+  if (avg <= 55) return "#F59E0B";
+  if (avg <= 70) return "#EF4444";
+  return "#8B5CF6";
+}
+
+/* ============ SECTION WRAPPER ============ */
+function Section({ number, title, description, children }) {
+  return (
+    <div className="mb-8">
+      <div className="flex items-center gap-3 mb-4">
+        <div
+          className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold"
+          style={{ background: "rgba(239,68,68,0.15)", color: "#EF4444" }}
+        >
+          {number}
+        </div>
+        <div>
+          <h2 className="text-lg font-bold" style={{ color: "rgba(255,255,255,0.9)" }}>{title}</h2>
+          {description && <p className="text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>{description}</p>}
+        </div>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+/* ============ PLAYER CARD ============ */
+function PlayerCard({ player, index, onRemove }) {
+  const isBot = player.type === "bot";
+  const isUser = player.type === "user";
+
+  return (
+    <div
+      className="flex items-center justify-between px-4 py-3 rounded-xl transition-all duration-200"
+      style={{
+        background: "rgba(255,255,255,0.03)",
+        border: "1px solid rgba(255,255,255,0.06)",
+      }}
+    >
+      <div className="flex items-center gap-3">
+        <span className="text-xs font-bold w-6 text-center" style={{ color: "rgba(255,255,255,0.2)" }}>
+          {index + 1}
+        </span>
+        <div
+          className="w-9 h-9 rounded-lg flex items-center justify-center text-sm font-bold"
+          style={{
+            background: isBot ? getBotColor(player.avgScore) + "20" : isUser ? "#EF444420" : "rgba(255,255,255,0.06)",
+            color: isBot ? getBotColor(player.avgScore) : isUser ? "#EF4444" : "rgba(255,255,255,0.5)",
+          }}
+        >
+          {isBot ? (
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+              <rect x="3" y="4" width="10" height="8" rx="2" />
+              <circle cx="6" cy="8" r="1" fill="currentColor" />
+              <circle cx="10" cy="8" r="1" fill="currentColor" />
+              <path d="M8 1v3" />
+            </svg>
+          ) : (
+            player.name[0].toUpperCase()
+          )}
+        </div>
+        <div>
+          <span className="text-sm font-semibold" style={{ color: "rgba(255,255,255,0.8)" }}>
+            {player.name}
+          </span>
+          <div className="flex items-center gap-2">
+            {isUser && <span className="text-[10px] uppercase tracking-widest" style={{ color: "#EF4444" }}>Du</span>}
+            {isBot && (
+              <span className="text-[10px] uppercase tracking-widest" style={{ color: getBotColor(player.avgScore) }}>
+                Bot — {getBotLabel(player.avgScore)} ({player.avgScore} avg)
+              </span>
+            )}
+            {player.type === "guest" && (
+              <span className="text-[10px] uppercase tracking-widest" style={{ color: "rgba(255,255,255,0.25)" }}>Gäst</span>
+            )}
+          </div>
+        </div>
+      </div>
+      {!isUser && (
+        <button
+          onClick={() => onRemove(player.id)}
+          className="p-1.5 rounded-lg transition-colors duration-150"
+          style={{ color: "rgba(255,255,255,0.15)" }}
+          onMouseEnter={(e) => e.currentTarget.style.color = "#EF4444"}
+          onMouseLeave={(e) => e.currentTarget.style.color = "rgba(255,255,255,0.15)"}
+        >
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+            <path d="M3 3l8 8M11 3l-8 8" />
+          </svg>
+        </button>
+      )}
+    </div>
+  );
+}
+
+/* ============ OPTION BUTTON ============ */
+function OptionButton({ label, selected, onClick, accent = "#EF4444" }) {
+  return (
+    <button
+      onClick={onClick}
+      className="px-5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200"
+      style={{
+        background: selected ? accent + "18" : "rgba(255,255,255,0.03)",
+        border: selected ? `1px solid ${accent}40` : "1px solid rgba(255,255,255,0.06)",
+        color: selected ? accent : "rgba(255,255,255,0.5)",
+        boxShadow: selected ? `0 0 15px ${accent}10` : "none",
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
+/* ============ DARTBOARD SVG — för Throw for Bull ============ */
+function Dartboard({ darts, onClickBoard, currentPlayerIndex, players }) {
+  const svgRef = useRef(null);
+  const boardRadius = 170;
+  const bullRadius = 12.7;
+  const outerBullRadius = 31.8;
+  const cx = 200;
+  const cy = 200;
+
+  const handleClick = (e) => {
+    const rect = svgRef.current.getBoundingClientRect();
+    const x = ((e.clientX - rect.left) / rect.width) * 400;
+    const y = ((e.clientY - rect.top) / rect.height) * 400;
+    const dist = Math.sqrt((x - cx) ** 2 + (y - cy) ** 2);
+    if (dist <= boardRadius) {
+      onClickBoard(x, y, dist);
+    }
+  };
+
+  const numbers = [20, 1, 18, 4, 13, 6, 10, 15, 2, 17, 3, 19, 7, 16, 8, 11, 14, 9, 12, 5];
+  const segAngle = 360 / 20;
+
+  return (
+    <svg
+      ref={svgRef}
+      viewBox="0 0 400 400"
+      className="w-full max-w-md cursor-crosshair"
+      onClick={handleClick}
+      style={{ filter: "drop-shadow(0 0 40px rgba(0,0,0,0.5))" }}
+    >
+      {/* Outer black ring */}
+      <circle cx={cx} cy={cy} r={boardRadius} fill="#1a1a1a" stroke="#333" strokeWidth="2" />
+
+      {/* Segments */}
+      {numbers.map((num, i) => {
+        const startAngle = (i * segAngle - 99) * (Math.PI / 180);
+        const endAngle = ((i + 1) * segAngle - 99) * (Math.PI / 180);
+        const isEven = i % 2 === 0;
+
+        const rings = [
+          { inner: 99, outer: boardRadius, fill: isEven ? "#1a1a1a" : "#f0e6d3" },
+          { inner: 95, outer: 99, fill: isEven ? "#e8373e" : "#1b8a42" },
+          { inner: 57, outer: 95, fill: isEven ? "#1a1a1a" : "#f0e6d3" },
+          { inner: 53, outer: 57, fill: isEven ? "#e8373e" : "#1b8a42" },
+        ];
+
+        return rings.map((ring, ri) => {
+          const x1 = cx + ring.inner * Math.cos(startAngle);
+          const y1 = cy + ring.inner * Math.sin(startAngle);
+          const x2 = cx + ring.outer * Math.cos(startAngle);
+          const y2 = cy + ring.outer * Math.sin(startAngle);
+          const x3 = cx + ring.outer * Math.cos(endAngle);
+          const y3 = cy + ring.outer * Math.sin(endAngle);
+          const x4 = cx + ring.inner * Math.cos(endAngle);
+          const y4 = cy + ring.inner * Math.sin(endAngle);
+
+          return (
+            <path
+              key={`${i}-${ri}`}
+              d={`M${x1} ${y1} L${x2} ${y2} A${ring.outer} ${ring.outer} 0 0 1 ${x3} ${y3} L${x4} ${y4} A${ring.inner} ${ring.inner} 0 0 0 ${x1} ${y1}Z`}
+              fill={ring.fill}
+              stroke="#333"
+              strokeWidth="0.5"
+            />
+          );
+        });
+      })}
+
+      {/* Outer bull */}
+      <circle cx={cx} cy={cy} r={outerBullRadius} fill="#1b8a42" stroke="#333" strokeWidth="0.5" />
+      {/* Inner bull */}
+      <circle cx={cx} cy={cy} r={bullRadius} fill="#e8373e" stroke="#333" strokeWidth="0.5" />
+
+      {/* Numbers */}
+      {numbers.map((num, i) => {
+        const angle = (i * segAngle - 90) * (Math.PI / 180);
+        const tx = cx + (boardRadius + 18) * Math.cos(angle);
+        const ty = cy + (boardRadius + 18) * Math.sin(angle);
+        return (
+          <text
+            key={`num-${num}`}
+            x={tx} y={ty}
+            textAnchor="middle"
+            dominantBaseline="central"
+            fill="rgba(255,255,255,0.7)"
+            fontSize="14"
+            fontWeight="600"
+            fontFamily="'Rajdhani', sans-serif"
+          >
+            {num}
+          </text>
+        );
+      })}
+
+      {/* Placed darts */}
+      {darts.map((dart, i) => (
+        <g key={i}>
+          {/* Dart shadow */}
+          <circle cx={dart.x + 2} cy={dart.y + 2} r="6" fill="rgba(0,0,0,0.3)" />
+          {/* Dart body */}
+          <circle cx={dart.x} cy={dart.y} r="5" fill={dart.color} stroke="#fff" strokeWidth="1.5" />
+          {/* Player number */}
+          <text
+            x={dart.x} y={dart.y + 0.5}
+            textAnchor="middle" dominantBaseline="central"
+            fill="#fff" fontSize="7" fontWeight="700"
+          >
+            {dart.playerIndex + 1}
+          </text>
+          {/* Distance line to center */}
+          <line
+            x1={cx} y1={cy} x2={dart.x} y2={dart.y}
+            stroke={dart.color} strokeWidth="0.5" strokeDasharray="3 3" opacity="0.4"
+          />
+        </g>
+      ))}
+
+      {/* Center crosshair */}
+      <line x1={cx - 5} y1={cy} x2={cx + 5} y2={cy} stroke="rgba(255,255,255,0.3)" strokeWidth="0.5" />
+      <line x1={cx} y1={cy - 5} x2={cx} y2={cy + 5} stroke="rgba(255,255,255,0.3)" strokeWidth="0.5" />
+    </svg>
+  );
+}
+
+/* ============ THROW FOR BULL VIEW ============ */
+function ThrowForBull({ players, onComplete, onBack }) {
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [darts, setDarts] = useState([]);
+  const [tempDart, setTempDart] = useState(null);
+  const [phase, setPhase] = useState("throwing"); // "throwing" | "results"
+
+  const playerColors = ["#EF4444", "#10B981", "#8B5CF6", "#F59E0B", "#60A5FA", "#EC4899", "#14B8A6", "#F97316"];
+
+  const handleBoardClick = (x, y, dist) => {
+    if (phase !== "throwing") return;
+    setTempDart({ x, y, dist, playerIndex: currentIndex, color: playerColors[currentIndex % playerColors.length] });
+  };
+
+  const confirmDart = () => {
+    if (!tempDart) return;
+    const newDarts = [...darts, tempDart];
+    setDarts(newDarts);
+    setTempDart(null);
+
+    if (currentIndex + 1 >= players.length) {
+      setPhase("results");
+    } else {
+      setCurrentIndex(currentIndex + 1);
+    }
+  };
+
+  const resetDart = () => {
+    setTempDart(null);
+  };
+
+  /* Sortera spelare efter avstånd till bull (närmast först) */
+  const sortedResults = [...darts].sort((a, b) => a.dist - b.dist);
+  const winner = sortedResults.length > 0 ? players[sortedResults[0].playerIndex] : null;
+
+  const handleStart = () => {
+    const order = sortedResults.map((d) => players[d.playerIndex]);
+    onComplete(order);
+  };
+
+  const allDarts = tempDart ? [...darts, tempDart] : darts;
+  const currentPlayer = players[currentIndex];
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex flex-col items-center justify-center"
+      style={{
+        background: "linear-gradient(145deg, #0a0a10 0%, #0f0f18 40%, #0d0d14 100%)",
+        fontFamily: "'Rajdhani', 'Segoe UI', sans-serif",
+      }}
+    >
+      {/* Background grid */}
+      <div className="absolute inset-0 opacity-[0.02]" style={{
+        backgroundImage: `linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)`,
+        backgroundSize: "60px 60px",
+      }} />
+
+      {/* Back button */}
+      <button
+        onClick={onBack}
+        className="absolute top-6 left-6 z-10 flex items-center gap-2 px-3 py-2 rounded-lg transition-all duration-200"
+        style={{ color: "rgba(255,255,255,0.3)" }}
+        onMouseEnter={(e) => e.currentTarget.style.color = "rgba(255,255,255,0.7)"}
+        onMouseLeave={(e) => e.currentTarget.style.color = "rgba(255,255,255,0.3)"}
+      >
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M10 2L4 8l6 6" />
+        </svg>
+        <span className="text-xs font-semibold uppercase tracking-widest">Avbryt</span>
+      </button>
+
+      <div className="relative z-10 flex flex-col items-center gap-6 w-full max-w-lg px-6">
+        {/* Title */}
+        <div className="text-center">
+          <h1 className="text-2xl font-extrabold uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.9)" }}>
+            Throw for bull
+          </h1>
+          <p className="text-xs uppercase tracking-widest mt-1" style={{ color: "rgba(255,255,255,0.25)" }}>
+            Närmast bull börjar matchen
+          </p>
+        </div>
+
+        {/* Current player indicator */}
+        {phase === "throwing" && (
+          <div
+            className="px-6 py-3 rounded-xl text-center"
+            style={{
+              background: playerColors[currentIndex % playerColors.length] + "15",
+              border: `1px solid ${playerColors[currentIndex % playerColors.length]}30`,
+            }}
+          >
+            <span className="text-xs uppercase tracking-widest block mb-1" style={{ color: "rgba(255,255,255,0.3)" }}>
+              Pil {currentIndex + 1} av {players.length}
+            </span>
+            <span className="text-xl font-bold" style={{ color: playerColors[currentIndex % playerColors.length] }}>
+              {currentPlayer.name} — Kasta din pil!
+            </span>
+          </div>
+        )}
+
+        {/* Results */}
+        {phase === "results" && (
+          <div
+            className="px-6 py-4 rounded-xl text-center w-full"
+            style={{ background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.25)" }}
+          >
+            <span className="text-xs uppercase tracking-widest block mb-2" style={{ color: "rgba(255,255,255,0.3)" }}>
+              Resultat — Spelordning
+            </span>
+            <div className="flex flex-col gap-2 mt-3">
+              {sortedResults.map((dart, i) => (
+                <div key={i} className="flex items-center justify-between px-4 py-2 rounded-lg" style={{
+                  background: i === 0 ? "rgba(16,185,129,0.1)" : "rgba(255,255,255,0.02)",
+                }}>
+                  <div className="flex items-center gap-3">
+                    <span className="text-sm font-bold w-6" style={{ color: i === 0 ? "#10B981" : "rgba(255,255,255,0.3)" }}>
+                      {i + 1}.
+                    </span>
+                    <div className="w-3 h-3 rounded-full" style={{ background: dart.color }} />
+                    <span className="text-sm font-semibold" style={{ color: i === 0 ? "#10B981" : "rgba(255,255,255,0.6)" }}>
+                      {players[dart.playerIndex].name}
+                    </span>
+                    {i === 0 && <span className="text-[10px] uppercase tracking-widest" style={{ color: "#10B981" }}>Börjar!</span>}
+                  </div>
+                  <span className="text-xs font-mono" style={{ color: "rgba(255,255,255,0.25)" }}>
+                    {dart.dist.toFixed(1)}px
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Dartboard */}
+        <Dartboard
+          darts={allDarts}
+          onClickBoard={handleBoardClick}
+          currentPlayerIndex={currentIndex}
+          players={players}
+        />
+
+        {/* Action buttons */}
+        <div className="flex gap-3">
+          {phase === "throwing" && tempDart && (
+            <>
+              <button
+                onClick={resetDart}
+                className="px-6 py-3 rounded-xl text-sm font-bold uppercase tracking-widest transition-all duration-200"
+                style={{ background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.5)", border: "1px solid rgba(255,255,255,0.1)" }}
+              >
+                Flytta
+              </button>
+              <button
+                onClick={confirmDart}
+                className="px-8 py-3 rounded-xl text-sm font-bold uppercase tracking-widest transition-all duration-200"
+                style={{
+                  background: "linear-gradient(135deg, #10B981 0%, #059669 100%)",
+                  color: "#fff",
+                  boxShadow: "0 4px 20px rgba(16,185,129,0.3)",
+                }}
+                onMouseEnter={(e) => { e.target.style.transform = "translateY(-1px)"; e.target.style.boxShadow = "0 4px 30px rgba(16,185,129,0.4)"; }}
+                onMouseLeave={(e) => { e.target.style.transform = "translateY(0)"; e.target.style.boxShadow = "0 4px 20px rgba(16,185,129,0.3)"; }}
+              >
+                Bekräfta pil
+              </button>
+            </>
+          )}
+          {phase === "throwing" && !tempDart && (
+            <span className="text-xs" style={{ color: "rgba(255,255,255,0.2)" }}>
+              Klicka på tavlan för att placera pilen
+            </span>
+          )}
+          {phase === "results" && (
+            <button
+              onClick={handleStart}
+              className="px-10 py-3.5 rounded-xl text-sm font-bold uppercase tracking-widest transition-all duration-200"
+              style={{
+                background: "linear-gradient(135deg, #EF4444 0%, #DC2626 100%)",
+                color: "#fff",
+                boxShadow: "0 4px 20px rgba(239,68,68,0.3)",
+              }}
+              onMouseEnter={(e) => { e.target.style.transform = "translateY(-1px)"; e.target.style.boxShadow = "0 4px 30px rgba(239,68,68,0.5)"; }}
+              onMouseLeave={(e) => { e.target.style.transform = "translateY(0)"; e.target.style.boxShadow = "0 4px 20px rgba(239,68,68,0.3)"; }}
+            >
+              Starta match!
+            </button>
+          )}
+        </div>
+
+        {/* Player pills at bottom */}
+        <div className="flex gap-2 flex-wrap justify-center">
+          {players.map((p, i) => {
+            const thrown = darts.some((d) => d.playerIndex === i);
+            const isCurrent = i === currentIndex && phase === "throwing";
+            return (
+              <div
+                key={p.id}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold"
+                style={{
+                  background: isCurrent ? playerColors[i % playerColors.length] + "15" : "rgba(255,255,255,0.02)",
+                  border: isCurrent ? `1px solid ${playerColors[i % playerColors.length]}40` : "1px solid rgba(255,255,255,0.06)",
+                  color: thrown ? "rgba(255,255,255,0.3)" : playerColors[i % playerColors.length],
+                  opacity: thrown && !isCurrent ? 0.5 : 1,
+                }}
+              >
+                <div className="w-2 h-2 rounded-full" style={{ background: playerColors[i % playerColors.length] }} />
+                {p.name}
+                {thrown && <span style={{ color: "rgba(255,255,255,0.2)" }}> ✓</span>}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    </div>
+  );
+}
+
+/* ============ MAIN MATCH SETUP PAGE ============ */
+export default function MatchSetup({ navigate, user }) {
+  const [players, setPlayers] = useState(() => {
+    const initial = [];
+    if (user) {
+      initial.push({ id: "user", type: "user", name: user.username });
+    }
+    return initial;
+  });
+
+  const [guestName, setGuestName] = useState("");
+  const [botAvg, setBotAvg] = useState(45);
+  const [startingScore, setStartingScore] = useState(501);
+  const [customScore, setCustomScore] = useState("");
+  const [scoreMode, setScoreMode] = useState("501");
+  const [legs, setLegs] = useState(3);
+  const [customLegs, setCustomLegs] = useState("");
+  const [legMode, setLegMode] = useState("first-to");
+  const [phase, setPhase] = useState("setup"); // "setup" | "throw-for-bull"
+
+  /* Lägg till gäst */
+  const addGuest = () => {
+    if (!guestName.trim()) return;
+    setPlayers((prev) => [...prev, { id: `guest-${Date.now()}`, type: "guest", name: guestName.trim() }]);
+    setGuestName("");
+  };
+
+  /* Lägg till bot */
+  const addBot = () => {
+    setPlayers((prev) => [
+      ...prev,
+      { id: `bot-${Date.now()}`, type: "bot", name: `Bot (${getBotLabel(botAvg)})`, avgScore: botAvg },
+    ]);
+  };
+
+  const removePlayer = (id) => {
+    setPlayers((prev) => prev.filter((p) => p.id !== id));
+  };
+
+  const handleScoreSelect = (mode) => {
+    setScoreMode(mode);
+    if (mode === "501") setStartingScore(501);
+    else if (mode === "301") setStartingScore(301);
+  };
+
+  const handleStart = () => {
+    if (players.length < 2) return;
+
+    /* Sätt custom score */
+    if (scoreMode === "custom" && customScore) {
+      setStartingScore(parseInt(customScore));
+    }
+
+    setPhase("throw-for-bull");
+  };
+
+  const handleThrowComplete = (order) => {
+    /* Backend: POST /api/game/match/create
+       Body: {
+         players: order.map(p => ({ id, type, name, avgScore? })),
+         starting_score: startingScore,
+         legs: legMode === 'custom' ? parseInt(customLegs) : legs,
+         format: legMode,
+         throw_order: order.map(p => p.id)
+       }
+       
+       Response: { match_id, ... }
+       → Navigera till scoreboard: navigate(`match-game-${match_id}`) */
+    const actualLegs = legMode === "custom-legs" ? (parseInt(customLegs) || 1) : legs;
+    navigate("match-game", {
+      players: order,
+      startingScore: scoreMode === "custom" ? (parseInt(customScore) || 501) : startingScore,
+      legs: actualLegs,
+      format: legMode === "best-of" ? "best-of" : "first-to",
+    });
+  };
+
+  if (phase === "throw-for-bull") {
+    return (
+      <ThrowForBull
+        players={players}
+        onComplete={handleThrowComplete}
+        onBack={() => setPhase("setup")}
+      />
+    );
+  }
+
+  const canStart = players.length >= 2;
+
+  return (
+    <div
+      className="relative min-h-screen overflow-hidden"
+      style={{
+        background: "linear-gradient(145deg, #0a0a10 0%, #0f0f18 40%, #0d0d14 100%)",
+        fontFamily: "'Rajdhani', 'Segoe UI', sans-serif",
+      }}
+    >
+      <div className="absolute inset-0 opacity-[0.03]" style={{
+        backgroundImage: `linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)`,
+        backgroundSize: "60px 60px",
+      }} />
+
+      {/* Header */}
+      <header className="relative z-10 flex items-center justify-between px-6 py-4">
+        <button onClick={() => navigate("lobby")} className="flex items-center gap-2 transition-colors duration-200" style={{ color: "rgba(255,255,255,0.3)" }}
+          onMouseEnter={(e) => e.currentTarget.style.color = "rgba(255,255,255,0.7)"}
+          onMouseLeave={(e) => e.currentTarget.style.color = "rgba(255,255,255,0.3)"}>
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M10 2L4 8l6 6" />
+          </svg>
+          <span className="text-xs font-semibold uppercase tracking-widest">Tillbaka</span>
+        </button>
+        <h1 className="text-lg font-bold uppercase tracking-widest" style={{ color: "rgba(255,255,255,0.6)" }}>
+          Match setup
+        </h1>
+        <div style={{ width: 80 }} />
+      </header>
+
+      {/* Main content */}
+      <main className="relative z-10 max-w-2xl mx-auto px-6 pb-16">
+        {/* ============ 1. SPELARVAL ============ */}
+        <Section number="1" title="Spelare" description="Lägg till spelare, gäster eller bottar">
+          {/* Player list */}
+          <div className="flex flex-col gap-2 mb-4">
+            {players.map((p, i) => (
+              <PlayerCard key={p.id} player={p} index={i} onRemove={removePlayer} />
+            ))}
+            {players.length === 0 && (
+              <p className="text-xs py-4 text-center" style={{ color: "rgba(255,255,255,0.2)" }}>
+                {user ? "Du är tillagd automatiskt." : "Logga in för att lägga till dig själv, eller lägg till gäster."}
+              </p>
+            )}
+          </div>
+
+          {/* Add guest */}
+          <div className="flex gap-2 mb-3">
+            <input
+              type="text"
+              value={guestName}
+              onChange={(e) => setGuestName(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && addGuest()}
+              placeholder="Gästnamn..."
+              className="flex-1 px-4 py-2.5 rounded-xl text-sm outline-none transition-all duration-200"
+              style={{
+                background: "rgba(255,255,255,0.04)",
+                border: "1px solid rgba(255,255,255,0.08)",
+                color: "rgba(255,255,255,0.8)",
+              }}
+              onFocus={(e) => e.target.style.borderColor = "rgba(255,255,255,0.2)"}
+              onBlur={(e) => e.target.style.borderColor = "rgba(255,255,255,0.08)"}
+            />
+            <button
+              onClick={addGuest}
+              className="px-5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200"
+              style={{
+                background: "rgba(255,255,255,0.05)",
+                border: "1px solid rgba(255,255,255,0.1)",
+                color: "rgba(255,255,255,0.6)",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.08)"; e.currentTarget.style.color = "rgba(255,255,255,0.9)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.05)"; e.currentTarget.style.color = "rgba(255,255,255,0.6)"; }}
+            >
+              + Gäst
+            </button>
+          </div>
+
+          {/* Add bot */}
+          <div
+            className="p-4 rounded-xl"
+            style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)" }}
+          >
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: "rgba(255,255,255,0.3)" }}>
+                Lägg till bot
+              </span>
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-bold" style={{ color: getBotColor(botAvg) }}>
+                  {getBotLabel(botAvg)}
+                </span>
+                <span className="text-xs font-mono" style={{ color: "rgba(255,255,255,0.3)" }}>
+                  {botAvg} avg
+                </span>
+              </div>
+            </div>
+            <div className="flex items-center gap-4">
+              <span className="text-[10px]" style={{ color: "rgba(255,255,255,0.2)" }}>15</span>
+              <input
+                type="range"
+                min="15"
+                max="80"
+                value={botAvg}
+                onChange={(e) => setBotAvg(parseInt(e.target.value))}
+                className="flex-1"
+                style={{ accentColor: getBotColor(botAvg) }}
+              />
+              <span className="text-[10px]" style={{ color: "rgba(255,255,255,0.2)" }}>80</span>
+              <button
+                onClick={addBot}
+                className="px-5 py-2 rounded-xl text-sm font-semibold transition-all duration-200"
+                style={{
+                  background: getBotColor(botAvg) + "15",
+                  border: `1px solid ${getBotColor(botAvg)}30`,
+                  color: getBotColor(botAvg),
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.background = getBotColor(botAvg) + "25"}
+                onMouseLeave={(e) => e.currentTarget.style.background = getBotColor(botAvg) + "15"}
+              >
+                + Bot
+              </button>
+            </div>
+            {/* Scale labels */}
+            <div className="flex justify-between mt-2 px-6">
+              {["Nybörjare", "Casual", "Medel", "Bra", "Pro"].map((l) => (
+                <span key={l} className="text-[9px]" style={{ color: "rgba(255,255,255,0.12)" }}>{l}</span>
+              ))}
+            </div>
+          </div>
+        </Section>
+
+        {/* ============ 2. POÄNGVAL ============ */}
+        <Section number="2" title="Startpoäng" description="Välj poäng att spela ner från">
+          <div className="flex gap-2 flex-wrap">
+            <OptionButton label="501" selected={scoreMode === "501"} onClick={() => handleScoreSelect("501")} />
+            <OptionButton label="301" selected={scoreMode === "301"} onClick={() => handleScoreSelect("301")} />
+            <OptionButton label="Custom" selected={scoreMode === "custom"} onClick={() => setScoreMode("custom")} />
+          </div>
+          {scoreMode === "custom" && (
+            <input
+              type="number"
+              value={customScore}
+              onChange={(e) => setCustomScore(e.target.value)}
+              placeholder="Ange poäng..."
+              className="mt-3 w-40 px-4 py-2.5 rounded-xl text-sm outline-none"
+              style={{
+                background: "rgba(255,255,255,0.04)",
+                border: "1px solid rgba(239,68,68,0.3)",
+                color: "rgba(255,255,255,0.8)",
+              }}
+            />
+          )}
+        </Section>
+
+        {/* ============ 3. LEGS & FORMAT ============ */}
+        <Section number="3" title="Legs & Format" description="Antal legs och matchformat">
+          {/* Leg count */}
+          <div className="flex gap-2 flex-wrap mb-4">
+            {[1, 3, 5, 7].map((n) => (
+              <OptionButton
+                key={n}
+                label={`${n}`}
+                selected={legs === n && legMode !== "custom-legs"}
+                onClick={() => { setLegs(n); setLegMode(legMode === "custom-legs" ? "first-to" : legMode); }}
+              />
+            ))}
+            <OptionButton
+              label="Custom"
+              selected={legMode === "custom-legs"}
+              onClick={() => setLegMode("custom-legs")}
+            />
+          </div>
+          {legMode === "custom-legs" && (
+            <input
+              type="number"
+              value={customLegs}
+              onChange={(e) => { setCustomLegs(e.target.value); setLegs(parseInt(e.target.value) || 1); }}
+              placeholder="Antal legs..."
+              className="mb-4 w-40 px-4 py-2.5 rounded-xl text-sm outline-none"
+              style={{
+                background: "rgba(255,255,255,0.04)",
+                border: "1px solid rgba(239,68,68,0.3)",
+                color: "rgba(255,255,255,0.8)",
+              }}
+            />
+          )}
+
+          {/* Format */}
+          <div className="flex gap-2">
+            <OptionButton
+              label={`Först till ${Math.ceil(legs / 2)}`}
+              selected={legMode === "first-to" || legMode === "custom-legs"}
+              onClick={() => setLegMode(legMode === "custom-legs" ? "custom-legs" : "first-to")}
+              accent="#10B981"
+            />
+            <OptionButton
+              label={`Bäst av ${legs}`}
+              selected={legMode === "best-of"}
+              onClick={() => setLegMode("best-of")}
+              accent="#8B5CF6"
+            />
+          </div>
+        </Section>
+
+        {/* ============ START BUTTON ============ */}
+        <div className="flex flex-col items-center gap-3 mt-4">
+          {!canStart && (
+            <span className="text-xs" style={{ color: "rgba(255,255,255,0.2)" }}>
+              Minst 2 spelare krävs för att starta
+            </span>
+          )}
+          <button
+            onClick={handleStart}
+            disabled={!canStart}
+            className="w-full max-w-md py-4 rounded-xl text-sm font-bold uppercase tracking-widest transition-all duration-200"
+            style={{
+              background: canStart ? "linear-gradient(135deg, #EF4444 0%, #DC2626 100%)" : "rgba(255,255,255,0.03)",
+              color: canStart ? "#fff" : "rgba(255,255,255,0.15)",
+              boxShadow: canStart ? "0 4px 20px rgba(239,68,68,0.25)" : "none",
+              cursor: canStart ? "pointer" : "not-allowed",
+            }}
+            onMouseEnter={(e) => { if (canStart) { e.target.style.boxShadow = "0 4px 30px rgba(239,68,68,0.5)"; e.target.style.transform = "translateY(-2px)"; }}}
+            onMouseLeave={(e) => { if (canStart) { e.target.style.boxShadow = "0 4px 20px rgba(239,68,68,0.25)"; e.target.style.transform = "translateY(0)"; }}}
+          >
+            Throw for bull →
+          </button>
+
+          {/* Match summary */}
+          {canStart && (
+            <div className="text-xs text-center mt-2" style={{ color: "rgba(255,255,255,0.2)" }}>
+              {players.length} spelare · {scoreMode === "custom" ? customScore || "?" : startingScore} poäng ·{" "}
+              {legMode === "best-of" ? `Bäst av ${legs}` : `Först till ${Math.ceil(legs / 2)}`} legs
+            </div>
+          )}
+        </div>
+      </main>
+
+      <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    </div>
+  );
+}

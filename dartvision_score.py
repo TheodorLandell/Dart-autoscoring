@@ -243,10 +243,11 @@ def deduplicate_darts(detections):
 # DART DETECTOR
 # ============================================================
 class DartDetector:
-    def __init__(self, model_path, conf=0.10):
+    def __init__(self, model_path, conf=0.10, tip_offset=0.3):
         self.model = YOLO(model_path)
         self.conf = conf
-        print(f"YOLO: {self.model.names}")
+        self.tip_offset = tip_offset  # 0.0 = bbox botten, 0.5 = mitten, 1.0 = toppen
+        print(f"YOLO: {self.model.names}  tip_offset: {tip_offset}")
 
     def detect(self, frame):
         results = self.model(frame, conf=self.conf, verbose=False)
@@ -254,8 +255,9 @@ class DartDetector:
         for box in results[0].boxes:
             conf = float(box.conf[0])
             x1, y1, x2, y2 = box.xyxy[0].tolist()
+            bbox_h = y2 - y1
             tip_x = (x1 + x2) / 2
-            tip_y = y2
+            tip_y = y2 - bbox_h * self.tip_offset  # flytta upp från botten
             darts.append({
                 "tip_x": tip_x,
                 "tip_y": tip_y,
@@ -269,8 +271,8 @@ class DartDetector:
 # PIPELINE
 # ============================================================
 class DartVisionPipeline:
-    def __init__(self, model_path, calib_left_path=None, calib_right_path=None, conf=0.10):
-        self.detector = DartDetector(model_path, conf)
+    def __init__(self, model_path, calib_left_path=None, calib_right_path=None, conf=0.10, tip_offset=0.3):
+        self.detector = DartDetector(model_path, conf, tip_offset)
         self.calib_left = CameraCalibration(calib_left_path) if calib_left_path else None
         self.calib_right = CameraCalibration(calib_right_path) if calib_right_path else None
         self.scoreboard = ScoreBoard()
@@ -422,6 +424,8 @@ def main():
     parser.add_argument("--calib_left", type=str, default=None)
     parser.add_argument("--calib_right", type=str, default=None)
     parser.add_argument("--conf", type=float, default=0.10)
+    parser.add_argument("--tip_offset", type=float, default=0.3,
+                        help="Spets-offset i bbox (0.0=botten, 0.5=mitten, 1.0=toppen)")
     parser.add_argument("--save", type=str)
     args = parser.parse_args()
 
@@ -440,6 +444,7 @@ def main():
         calib_left_path=args.calib_left,
         calib_right_path=args.calib_right,
         conf=args.conf,
+        tip_offset=args.tip_offset,
     )
 
     if args.video:
@@ -466,9 +471,9 @@ def main():
 
     print(f"\nDartVision v2")
     print(f"  Feed: {f_w}x{f_h} @ {fps:.0f}fps")
-    print(f"  Conf: {args.conf}  Dedup: {DEDUP_DISTANCE_MM}mm")
+    print(f"  Conf: {args.conf}  Dedup: {DEDUP_DISTANCE_MM}mm  Tip: {args.tip_offset}")
     print(f"  Kalib: L={'JA' if args.calib_left else 'NEJ'} R={'JA' if args.calib_right else 'NEJ'}")
-    print(f"\n  q=avsluta  +/-=conf  r=reset  p=paus\n")
+    print(f"\n  q=avsluta  +/-=conf  w/s=tip upp/ner  r=reset  p=paus\n")
 
     paused = False
 
@@ -514,6 +519,12 @@ def main():
             pipeline.scored_positions.clear()
             pipeline.prev_dart_count = 0
             print("  Score reset!")
+        elif key == ord('w'):
+            pipeline.detector.tip_offset = min(1.0, pipeline.detector.tip_offset + 0.05)
+            print(f"  tip_offset = {pipeline.detector.tip_offset:.2f} (spets hogre)")
+        elif key == ord('s'):
+            pipeline.detector.tip_offset = max(0.0, pipeline.detector.tip_offset - 0.05)
+            print(f"  tip_offset = {pipeline.detector.tip_offset:.2f} (spets lagre)")
 
     cap.release()
     if writer:
