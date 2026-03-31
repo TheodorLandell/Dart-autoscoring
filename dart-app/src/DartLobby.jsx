@@ -1,35 +1,5 @@
 import { useState } from "react";
 
-/*
-  ┌─────────────────────────────────────────────────────────────┐
-  │  DART LOBBY — Appens startskärm                            │
-  │                                                             │
-  │  Layout:                                                    │
-  │  ┌──────────┐                              ┌──────────────┐ │
-  │  │  LOGIN/  │    (övre vänstra hörnet)      │ KALIBRERING  │ │
-  │  │  PROFIL  │    Ej inloggad → login-sida   │ knapp        │ │
-  │  └──────────┘    Inloggad → profilsida      └──────────────┘ │
-  │                                                             │
-  │                    ┌──────────────┐                          │
-  │                    │  APP TITEL   │                          │
-  │                    │  + subtitle  │                          │
-  │                    └──────────────┘                          │
-  │                                                             │
-  │  ┌────────────┐  ┌────────────┐  ┌────────────┐            │
-  │  │   MATCH    │  │    121     │  │  AROUND    │            │
-  │  │            │  │            │  │  THE CLOCK │            │
-  │  │ 501/301/   │  │ Checkout-  │  │ 1→20→Bull  │            │
-  │  │ Custom     │  │ utmaning   │  │ i ordning  │            │
-  │  └────────────┘  └────────────┘  └────────────┘            │
-  │                                                             │
-  │  Backend behov:                                             │
-  │  - Auth endpoints (login/register/session)                  │
-  │  - GET /api/user/profile (för att visa inloggad spelare)   │
-  │  - GET/POST /api/calibration (kamerainställningar)         │
-  │  - Game state management per spelläge                      │
-  └─────────────────────────────────────────────────────────────┘
-*/
-
 const GAME_MODES = [
   {
     id: "match",
@@ -50,6 +20,25 @@ const GAME_MODES = [
     ),
     accent: "#EF4444",
     glowColor: "239, 68, 68",
+  },
+  {
+    id: "tournament",
+    title: "Tournament",
+    subtitle: "Single elimination",
+    description: "Cup-format med bracket. Minst 4 spelare. Random draw, byes automatiskt. Vem tar hem pokalen?",
+    icon: (
+      <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+        <path d="M14 18H10.5a5 5 0 010-10C16 8 16 14 16 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity="0.5" />
+        <path d="M34 18h3.5a5 5 0 000-10C32 8 32 14 32 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity="0.5" />
+        <path d="M10 42h28" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity="0.4" />
+        <path d="M20 28v6c0 1.1-.94 1.96-1.94 2.42C16 37.5 15 39.5 15 42" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity="0.5" />
+        <path d="M28 28v6c0 1.1.94 1.96 1.94 2.42C32 37.5 33 39.5 33 42" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity="0.5" />
+        <path d="M34 4H14v14a10 10 0 0020 0V4z" stroke="currentColor" strokeWidth="1.5" opacity="0.7" />
+        <circle cx="24" cy="15" r="3" fill="#F59E0B" />
+      </svg>
+    ),
+    accent: "#F59E0B",
+    glowColor: "245, 158, 11",
   },
   {
     id: "121",
@@ -170,7 +159,6 @@ function GameCard({ mode, index, onSelect }) {
   );
 }
 
-/* ============ HEADER BUTTON — Återanvändbar med hover-effekter ============ */
 function HeaderButton({ onClick, children }) {
   const [hovered, setHovered] = useState(false);
 
@@ -197,8 +185,6 @@ export default function DartLobby({ navigate, user }) {
     navigate(id);
   };
 
-  /* Om inloggad → klicka går till profilsida
-     Om ej inloggad → klicka går till login */
   const handleUserClick = () => {
     if (user) {
       navigate("profile");
@@ -230,12 +216,7 @@ export default function DartLobby({ navigate, user }) {
         style={{ background: "radial-gradient(ellipse, rgba(239,68,68,0.03) 0%, transparent 70%)" }}
       />
 
-      {/* ============ TOP BAR ============ */}
       <header className="relative z-10 flex items-center justify-between px-6 py-4">
-        {/* LOGIN / PROFIL — Övre vänstra hörnet
-            Ej inloggad: visar "Logga in" → navigerar till login-sida
-            Inloggad: visar spelarnamn + avatar → navigerar till profilsida
-            Backend: GET /api/user/profile */}
         <HeaderButton onClick={handleUserClick}>
           <div
             className="w-8 h-8 rounded-lg flex items-center justify-center transition-all duration-300"
@@ -263,8 +244,6 @@ export default function DartLobby({ navigate, user }) {
           )}
         </HeaderButton>
 
-        {/* KAMERAKALIBRERING — Övre högra hörnet
-            Backend: GET/POST /api/calibration */}
         <HeaderButton onClick={() => navigate("calibrate")}>
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="rgba(255,255,255,0.4)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
             <rect x="2" y="2" width="12" height="12" rx="2" />
@@ -277,7 +256,6 @@ export default function DartLobby({ navigate, user }) {
         </HeaderButton>
       </header>
 
-      {/* ============ MAIN CONTENT ============ */}
       <main className="relative z-10 flex flex-col items-center px-6 pt-8 pb-16">
         <div className="text-center mb-12">
           <div className="flex items-center justify-center gap-3 mb-3">
@@ -298,7 +276,6 @@ export default function DartLobby({ navigate, user }) {
           </p>
         </div>
 
-        {/* ============ GAME MODES ============ */}
         <div className="w-full max-w-4xl">
           <div className="flex items-center gap-3 mb-6">
             <div className="h-px flex-1" style={{ background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.08))" }} />
@@ -308,9 +285,17 @@ export default function DartLobby({ navigate, user }) {
             <div className="h-px flex-1" style={{ background: "linear-gradient(90deg, rgba(255,255,255,0.08), transparent)" }} />
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {GAME_MODES.map((mode, i) => (
+          {/* Top row: Match + Tournament */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+            {GAME_MODES.filter((m) => m.id === "match" || m.id === "tournament").map((mode, i) => (
               <GameCard key={mode.id} mode={mode} index={i} onSelect={handleGameSelect} />
+            ))}
+          </div>
+
+          {/* Bottom row: 121 + Around the Clock */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {GAME_MODES.filter((m) => m.id === "121" || m.id === "around-the-clock").map((mode, i) => (
+              <GameCard key={mode.id} mode={mode} index={i + 2} onSelect={handleGameSelect} />
             ))}
           </div>
         </div>

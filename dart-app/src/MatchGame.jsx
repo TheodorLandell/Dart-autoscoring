@@ -2,13 +2,11 @@ import { useState, useRef, useMemo } from "react";
 
 /*
   ┌─────────────────────────────────────────────────────────────┐
-  │  MATCH GAMEPLAY v3                                         │
+  │  MATCH GAMEPLAY v3 + TOURNAMENT SUPPORT                    │
   │                                                             │
-  │  Fixes:                                                     │
-  │  - Scoreboard: MYCKET STÖRRE text, tydlig avg              │
-  │  - Score editor: Exakt som referensbild — kompakt grid     │
-  │    5 kolumner × 4 rader, Bull/Outer, Ångra/Miss            │
-  │    Centrad modal, inte fullskärm                           │
+  │  Tillägg:                                                   │
+  │  - isTournament prop → visar "Tillbaka till bracket"       │
+  │  - onTournamentMatchComplete callback → skickar resultat   │
   └─────────────────────────────────────────────────────────────┘
 */
 
@@ -52,14 +50,7 @@ function Board({darts,onClick}){
   );
 }
 
-/* ============ SCORE EDITOR — Exakt som referensbild ============ */
-/* ============ SCORE EDITOR — Tabbar överst, nummergrid under ============ */
-/* Tabbar: Single (default) | Double | Treble | Bull 50 | Outer 25
-   Klicka tab → byter aktiv multiplikator
-   Bull/Outer tabbar → direkt-select (50 resp 25)
-   Grid: 4 rader × 5 kolumner med nummer 1-20
-   Klicka nummer → registrerar med aktiv multiplikator
-   Längst ner: Ångra + Miss */
+/* ============ SCORE EDITOR ============ */
 function ScoreEditor({onSelect,onUndo,onClose}){
   const [activeTab,setActiveTab]=useState("S");
   const mk=(zone,value,label,multiplier,number)=>({zone,value,label,multiplier,number});
@@ -69,14 +60,11 @@ function ScoreEditor({onSelect,onUndo,onClose}){
     {id:"T",label:"Treble",mult:3,color:"#A78BFA"},
   ];
   const activeMult=tabs.find(t=>t.id===activeTab)?.mult||1;
-  const activeColor=tabs.find(t=>t.id===activeTab)?.color||"#fff";
   const rows=[[1,2,3,4,5],[6,7,8,9,10],[11,12,13,14,15],[16,17,18,19,20]];
 
   return(
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{background:"rgba(0,0,0,0.7)",backdropFilter:"blur(6px)"}} onClick={onClose}>
       <div onClick={(e)=>e.stopPropagation()} className="w-full max-w-md rounded-2xl overflow-hidden" style={{background:"#1b2b1b",border:"1px solid rgba(255,255,255,0.1)",boxShadow:"0 20px 60px rgba(0,0,0,0.7)"}}>
-
-        {/* ===== TABS ===== */}
         <div className="flex" style={{borderBottom:"2px solid #EF4444"}}>
           {tabs.map((t)=>(
             <button key={t.id} onClick={()=>setActiveTab(t.id)}
@@ -89,7 +77,6 @@ function ScoreEditor({onSelect,onUndo,onClose}){
               {t.label}
             </button>
           ))}
-          {/* Bull 50 — direkt-select */}
           <button onClick={()=>onSelect(mk("D-Bull",50,"D-Bull",2,25))}
             className="flex-1 py-3 text-center text-xs font-bold uppercase tracking-wider transition-all duration-150"
             style={{background:"transparent",color:"#EF4444"}}
@@ -97,7 +84,6 @@ function ScoreEditor({onSelect,onUndo,onClose}){
             onMouseLeave={(e)=>e.currentTarget.style.background="transparent"}>
             Bull<span className="block text-[10px] font-normal" style={{color:"rgba(239,68,68,0.6)"}}>50</span>
           </button>
-          {/* Outer 25 — direkt-select */}
           <button onClick={()=>onSelect(mk("Bull",25,"Bull",1,25))}
             className="flex-1 py-3 text-center text-xs font-bold uppercase tracking-wider transition-all duration-150"
             style={{background:"transparent",color:"#10B981"}}
@@ -106,8 +92,6 @@ function ScoreEditor({onSelect,onUndo,onClose}){
             Outer<span className="block text-[10px] font-normal" style={{color:"rgba(16,185,129,0.6)"}}>25</span>
           </button>
         </div>
-
-        {/* ===== NUMBER GRID ===== */}
         {rows.map((row,ri)=>(
           <div key={ri} className="grid grid-cols-5">
             {row.map((n)=>{
@@ -125,8 +109,6 @@ function ScoreEditor({onSelect,onUndo,onClose}){
             })}
           </div>
         ))}
-
-        {/* ===== ÅNGRA + MISS ===== */}
         <div className="grid grid-cols-2" style={{borderTop:"2px solid rgba(255,255,255,0.08)"}}>
           <button onClick={()=>{onClose();onUndo();}}
             className="py-4 text-center text-sm font-bold uppercase tracking-widest transition-all duration-100"
@@ -172,8 +154,8 @@ function DartSlot({index,dart,isCurrent,onEdit}){
   );
 }
 
-/* ============ MAIN ============ */
-export default function MatchGame({navigate,matchConfig}){
+/* ============ MAIN — TOURNAMENT PROPS TILLAGDA ============ */
+export default function MatchGame({ navigate, matchConfig, isTournament = false, onTournamentMatchComplete = null }) {
   const{players,startingScore,legs:totalLegs,format}=matchConfig;
   const legsToWin=format==="best-of"?Math.ceil(totalLegs/2):totalLegs;
 
@@ -189,6 +171,8 @@ export default function MatchGame({navigate,matchConfig}){
   const [gameOver,setGameOver]=useState(false);
   const [winner,setWinner]=useState(null);
   const [bust,setBust]=useState(null);
+  /* TOURNAMENT: spara slutgiltiga legsWon för callback */
+  const [finalLegsWon, setFinalLegsWon] = useState(null);
 
   const cp=players[cpIdx];
   const cs=scores[cpIdx];
@@ -200,13 +184,11 @@ export default function MatchGame({navigate,matchConfig}){
   const checkout=useMemo(()=>{if(proj<=0)return null;return getCheckout(proj,left);},[proj,left]);
   const getAvg=(i)=>rndCount[i]===0?"–":(totThrown[i]/rndCount[i]).toFixed(1);
 
-  /* Handle throw from board */
   const handleThrow=(di)=>{
     if(thrown>=3||gameOver)return;
     applyDart(di);
   };
 
-  /* Apply a dart (from board click or from editor) */
   const applyDart=(di)=>{
     const nd=[...cDarts];nd[thrown]=di;
     const nt=nd.reduce((s,d)=>s+(d?d.value:0),0);
@@ -217,7 +199,13 @@ export default function MatchGame({navigate,matchConfig}){
       setTotThrown(p=>{const n=[...p];n[cpIdx]+=nt;return n;});
       setRndCount(p=>{const n=[...p];n[cpIdx]++;return n;});
       const nl=[...legsWon];nl[cpIdx]++;
-      if(nl[cpIdx]>=legsToWin){setLegsWon(nl);setWinner(cp);setGameOver(true);return;}
+      if(nl[cpIdx]>=legsToWin){
+        setScores(p=>{const n=[...p];n[cpIdx]=0;return n;});
+        setLegsWon(nl);setWinner(cp);setGameOver(true);
+        /* TOURNAMENT: spara legs-resultat */
+        setFinalLegsWon(nl);
+        return;
+      }
       setHistory(p=>[...p,{pi:cpIdx,darts:nd,sb:cs,bust:false}]);
       setLegsWon(nl);setScores(players.map(()=>startingScore));setCDarts([null,null,null]);setDPos([]);setCpIdx(0);return;
     }
@@ -254,33 +242,31 @@ export default function MatchGame({navigate,matchConfig}){
     setRndCount(p=>{const n=[...p];n[lr.pi]=Math.max(0,n[lr.pi]-1);return n;});
   };
 
-  /* Score editor: user clicks a number → show S/D/T picker */
   const handleEditorSelect=(di)=>{
     if(di.multiplier!==undefined){
-      /* Direct select (Bull, Miss) */
       if(editing!==null&&cDarts[editing]){
         const n=[...cDarts];n[editing]={...n[editing],...di};setCDarts(n);setEditing(null);
       } else {
         applyDart(di);
       }
-      setPickingNum(null);
       return;
     }
-    /* Number clicked → need multiplier */
-    setPickingNum(di.number);
-  };
-
-  const handleMultiplierPick=(di)=>{
-    if(editing!==null&&cDarts[editing]){
-      const n=[...cDarts];n[editing]={...n[editing],...di};setCDarts(n);setEditing(null);
-    } else {
-      applyDart(di);
-    }
-    setPickingNum(null);
   };
 
   const PC=["#EF4444","#10B981","#8B5CF6","#F59E0B","#60A5FA","#EC4899","#14B8A6","#F97316"];
   const canUndo=thrown>0||history.length>0;
+
+  /* TOURNAMENT: Hantera "tillbaka till bracket" efter vinst */
+  const handleReturnToBracket = () => {
+    if (onTournamentMatchComplete && winner && finalLegsWon) {
+      onTournamentMatchComplete(winner, finalLegsWon);
+    }
+  };
+
+  /* TOURNAMENT: Avbryt match och gå tillbaka till bracket utan resultat */
+  const handleAbortTournamentMatch = () => {
+    navigate("tournament-bracket");
+  };
 
   return(
     <div className="relative min-h-screen overflow-hidden" style={{background:"linear-gradient(145deg, #0a0a10 0%, #0f0f18 40%, #0d0d14 100%)",fontFamily:"'Rajdhani','Segoe UI',sans-serif"}}>
@@ -288,14 +274,17 @@ export default function MatchGame({navigate,matchConfig}){
 
       {/* Header */}
       <header className="relative z-10 flex items-center justify-between px-6 py-3">
-        <button onClick={()=>navigate("lobby")} className="flex items-center gap-2 transition-colors duration-200" style={{color:"rgba(255,255,255,0.3)"}}
+        <button onClick={()=>isTournament ? handleAbortTournamentMatch() : navigate("lobby")} className="flex items-center gap-2 transition-colors duration-200" style={{color:"rgba(255,255,255,0.3)"}}
           onMouseEnter={(e)=>e.currentTarget.style.color="rgba(255,255,255,0.7)"} onMouseLeave={(e)=>e.currentTarget.style.color="rgba(255,255,255,0.3)"}>
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M10 2L4 8l6 6"/></svg>
           <span className="text-xs font-semibold uppercase tracking-widest">Avbryt</span>
         </button>
-        <span className="text-sm font-bold uppercase tracking-widest" style={{color:"rgba(255,255,255,0.3)"}}>
-          {startingScore} · {format==="best-of"?`Bäst av ${totalLegs}`:`Först till ${legsToWin}`}
-        </span>
+        <div className="flex items-center gap-3">
+          {isTournament && <span className="text-lg">🏆</span>}
+          <span className="text-sm font-bold uppercase tracking-widest" style={{color:"rgba(255,255,255,0.3)"}}>
+            {startingScore} · {format==="best-of"?`Bäst av ${totalLegs}`:`Först till ${legsToWin}`}
+          </span>
+        </div>
         <div style={{width:80}}/>
       </header>
 
@@ -309,7 +298,20 @@ export default function MatchGame({navigate,matchConfig}){
             <div className="flex justify-center gap-6 mb-4">
               {players.map((p,i)=>(<span key={p.id} className="text-sm" style={{color:"rgba(255,255,255,0.4)"}}>{p.name}: <strong style={{color:PC[i%PC.length]}}>{getAvg(i)}</strong> avg</span>))}
             </div>
-            <button onClick={()=>navigate("lobby")} className="px-10 py-3 rounded-xl text-sm font-bold uppercase tracking-widest" style={{background:"linear-gradient(135deg, #EF4444 0%, #DC2626 100%)",color:"#fff"}}>Till lobbyn</button>
+            <div className="flex justify-center gap-6 mb-6">
+              {players.map((p,i)=>(<span key={p.id} className="text-sm" style={{color:"rgba(255,255,255,0.3)"}}>{p.name}: <strong style={{color:PC[i%PC.length]}}>{legsWon[i]}</strong> legs</span>))}
+            </div>
+
+            {/* TOURNAMENT: Tillbaka till bracket-knapp */}
+            {isTournament ? (
+              <button onClick={handleReturnToBracket} className="px-10 py-3 rounded-xl text-sm font-bold uppercase tracking-widest transition-all duration-200" style={{background:"linear-gradient(135deg, #F59E0B 0%, #D97706 100%)",color:"#fff",boxShadow:"0 4px 20px rgba(245,158,11,0.3)"}}
+                onMouseEnter={(e)=>{e.target.style.transform="translateY(-1px)";e.target.style.boxShadow="0 4px 30px rgba(245,158,11,0.5)";}}
+                onMouseLeave={(e)=>{e.target.style.transform="translateY(0)";e.target.style.boxShadow="0 4px 20px rgba(245,158,11,0.3)";}}>
+                🏆 Tillbaka till bracket
+              </button>
+            ) : (
+              <button onClick={()=>navigate("lobby")} className="px-10 py-3 rounded-xl text-sm font-bold uppercase tracking-widest" style={{background:"linear-gradient(135deg, #EF4444 0%, #DC2626 100%)",color:"#fff"}}>Till lobbyn</button>
+            )}
           </div>
         )}
 
@@ -325,20 +327,16 @@ export default function MatchGame({navigate,matchConfig}){
           </div>
         )}
 
-        {/* Bust */}
         {bust&&(<div className="mb-3 px-6 py-2.5 rounded-xl" style={{background:"rgba(239,68,68,0.15)",border:"1px solid rgba(239,68,68,0.3)"}}><span className="text-base font-bold" style={{color:"#EF4444"}}>{bust}</span></div>)}
 
-        {/* ===== BOARD ===== */}
         {!gameOver&&<Board darts={dPos} onClick={handleThrow}/>}
 
-        {/* ===== DART SLOTS ===== */}
         {!gameOver&&(
           <div className="flex items-center gap-3 mt-5">
             {cDarts.map((d,i)=>(<DartSlot key={i} index={i} dart={d} isCurrent={i===thrown} onEdit={setEditing}/>))}
           </div>
         )}
 
-        {/* Round info */}
         {!gameOver&&thrown>0&&(
           <div className="flex items-center gap-6 mt-3">
             <span className="text-base" style={{color:"rgba(255,255,255,0.35)"}}>Runda: <strong className="text-lg" style={{color:"rgba(255,255,255,0.8)"}}>{rndTotal}</strong></span>
@@ -346,7 +344,6 @@ export default function MatchGame({navigate,matchConfig}){
           </div>
         )}
 
-        {/* ===== ACTIONS ===== */}
         {!gameOver&&(
           <div className="flex items-center gap-3 mt-4">
             <button onClick={handleUndo} disabled={!canUndo}
@@ -366,7 +363,6 @@ export default function MatchGame({navigate,matchConfig}){
           </div>
         )}
 
-        {/* ===== CHECKOUT ===== */}
         {!gameOver&&checkout&&left>0&&(
           <div className="mt-4 px-6 py-3 rounded-xl w-full max-w-sm" style={{background:"rgba(139,92,246,0.08)",border:"1px solid rgba(139,92,246,0.25)"}}>
             <span className="text-xs uppercase tracking-widest block mb-2" style={{color:"rgba(255,255,255,0.3)"}}>Checkout ({proj})</span>
@@ -416,7 +412,6 @@ export default function MatchGame({navigate,matchConfig}){
         </div>
       </main>
 
-      {/* ===== SCORE EDITOR MODAL ===== */}
       {editing!==null&&cDarts[editing]&&(
         <ScoreEditor
           onSelect={(di)=>{

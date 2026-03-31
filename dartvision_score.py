@@ -1,14 +1,26 @@
 """
-DartVision – YOLO + Homography Scoring Pipeline v2
-====================================================
-Komplett system med board-space deduplication.
+DartVision – YOLO + Homography Scoring Pipeline v3 (Optimerad)
+================================================================
+Förbättringar över v2:
+  1. DartTracker – temporal smoothing av positioner (EMA) + min_hits
+     innan en detektion räknas som stabil → eliminerar flicker-scoring
+  2. Debounce / frame-stabil kast-registrering – kräver N stabila frames
+     innan ett nytt kast registreras, förhindrar dubbelregistreringar
+  3. Adaptiv tip-lokalisering – tar hänsyn till bbox aspect ratio för
+     att bättre uppskatta spetspositionen på vinklade pilar
+  4. Homografi-validering – kasserar transformationer som hamnar utanför
+     tavlan (r > DOUBLE_OUTER + marginal)
+  5. Confidence-gating – separerar visningströskel från scoring-tröskel
+  6. Ökad dedup-radie (20mm) + scored_positions-radie (25mm)
+  7. Ny runda kräver 0-darts i flera frames (undviker falskt reset)
 
-Båda kamerorna detekterar → transformerar till tavlkoordinater (mm) →
-pilar inom 15mm från varandra = samma pil → behåll högst confidence.
+Användning:
+    python dartvision_score_v3.py --video dart.avi --model best.pt
+    python dartvision_score_v3.py --camera 0 --model best.pt
+    python dartvision_score_v3.py --camera 0 --model best.pt --save output.mp4
 
-    python dartvision_score.py --video dart_20260323_104950.avi --model best.pt
-    python dartvision_score.py --camera 0 --model best.pt
-    python dartvision_score.py --video dart_20260323_104950.avi --model best.pt --save output.mp4
+Tangenter:
+    q=avsluta  +/-=conf  w/s=tip  r=reset  p=paus  d=debug  t=tracker-info
 """
 
 from ultralytics import YOLO
@@ -18,9 +30,10 @@ import json
 import math
 import argparse
 from pathlib import Path
+from collections import deque
 
 # ============================================================
-# DARTTAVLA GEOMETRI
+# DARTTAVLA GEOMETRI (mm)
 # ============================================================
 BULL_RADIUS = 6.35
 OUTER_BULL_RADIUS = 15.9
@@ -38,8 +51,26 @@ BOARD_SCALE = (BOARD_SIZE / 2 - 30) / DOUBLE_OUTER
 
 WIRE_TOLERANCE_MM = 2.0
 
-# Dedup
-DEDUP_DISTANCE_MM = 15.0  # inom 15mm = samma pil
+# ============================================================
+# TUNING-PARAMETRAR (v3)
+# ============================================================
+DEDUP_DISTANCE_MM = 20.0       # ökad från 15 → robustare vid homografi-error
+SCORED_DEDUP_MM = 25.0         # radie för att undvika dubbelregistrering i scoreboard
+BOARD_RADIUS_MAX_MM = 200.0    # homografi-validering: max avstånd från centrum
+
+# Tracker
+TRACK_MATCH_MM = 18.0          # max avstånd för att matcha detektion → befintlig track
+TRACK_MIN_HITS = 3             # frames en pil måste synas innan den räknas
+TRACK_MAX_AGE = 8              # frames utan detektion innan track dör
+TRACK_SMOOTH_ALPHA = 0.4       # EMA-faktor (lägre = mer smoothing)
+
+# Debounce
+STABLE_FRAMES_REQUIRED = 4    # antal frames med samma dart-antal innan scoring
+ZERO_FRAMES_REQUIRED = 5      # antal frames med 0 darts innan "ny runda"
+
+# Confidence
+CONF_SCORE_MIN = 0.20         # under detta → visas men scoreas inte
+CONF_DISPLAY_MIN = 0.10       # under detta → visas inte alls
 
 # Färger
 COL_GREEN = (0, 255, 0)
@@ -51,6 +82,7 @@ COL_ORANGE = (0, 165, 255)
 COL_GRAY = (150, 150, 150)
 COL_BG = (30, 30, 30)
 COL_DIM_GREEN = (0, 80, 0)
+COL_BLUE = (255, 140, 0)
 
 
 # ============================================================
@@ -110,7 +142,7 @@ def dist_mm(a, b):
 
 
 # ============================================================
-# KALIBRERING
+# KALIBRERING (med homografi-validering)
 # ============================================================
 class CameraCalibration:
     def __init__(self, calib_path):
@@ -121,14 +153,148 @@ class CameraCalibration:
         self.camera = data.get("camera", "")
 
     def cam_to_board_mm(self, cam_x, cam_y):
+        """Transformera kamera-pixel → board mm. Returnerar (None, None) om utanför tavlan."""
         pt = np.array([[[cam_x, cam_y]]], dtype=np.float32)
         warped = cv2.perspectiveTransform(pt, self.H)[0][0]
-        return pixel_to_mm(warped[0], warped[1])
+        x_mm, y_mm = pixel_to_mm(warped[0], warped[1])
+
+        # Validering: kassera om transformationen hamnar långt utanför tavlan
+        r = math.sqrt(x_mm**2 + y_mm**2)
+        if r > BOARD_RADIUS_MAX_MM:
+            return None, None
+
+        return x_mm, y_mm
 
     def cam_to_warped_px(self, cam_x, cam_y):
         pt = np.array([[[cam_x, cam_y]]], dtype=np.float32)
         warped = cv2.perspectiveTransform(pt, self.H)[0][0]
         return (int(warped[0]), int(warped[1]))
+
+
+# ============================================================
+# DART TRACKER – temporal smoothing
+# ============================================================
+class DartTrack:
+    """En enskild pil-track med smoothad position."""
+    _next_id = 0
+
+    def __init__(self, x_mm, y_mm, conf, cam, det_data):
+        self.id = DartTrack._next_id
+        DartTrack._next_id += 1
+
+        self.x_mm = x_mm
+        self.y_mm = y_mm
+        self.smooth_x = x_mm
+        self.smooth_y = y_mm
+        self.conf = conf
+        self.cam = cam
+        self.det_data = det_data  # senaste detektionsdata (för rendering)
+
+        self.hits = 1
+        self.age = 0            # frames sedan senaste match
+        self.scored = False     # har denna track redan registrerats som kast?
+
+    def update(self, x_mm, y_mm, conf, cam, det_data):
+        """Uppdatera med ny detektion → EMA-smoothing."""
+        alpha = TRACK_SMOOTH_ALPHA
+        self.smooth_x = alpha * x_mm + (1 - alpha) * self.smooth_x
+        self.smooth_y = alpha * y_mm + (1 - alpha) * self.smooth_y
+        self.x_mm = x_mm
+        self.y_mm = y_mm
+        self.conf = max(self.conf, conf)  # behåll bästa confidence
+        self.cam = cam
+        self.det_data = det_data
+        self.hits += 1
+        self.age = 0
+
+    @property
+    def is_confirmed(self):
+        """Track anses stabil efter TRACK_MIN_HITS detektioner."""
+        return self.hits >= TRACK_MIN_HITS
+
+    @property
+    def is_dead(self):
+        return self.age > TRACK_MAX_AGE
+
+
+class DartTracker:
+    """
+    Hanterar alla aktiva dart-tracks.
+    Varje frame: matcha nya detektioner → existerande tracks,
+    skapa nya tracks för omatchade, åldra/döda gamla.
+    """
+    def __init__(self):
+        self.tracks: list[DartTrack] = []
+
+    def update(self, detections):
+        """
+        Tar lista av merged-detektioner (med board_x_mm/board_y_mm).
+        Returnerar lista av bekräftade (stabila) tracks.
+        """
+        # Matcha detektioner → tracks (greedy nearest-neighbor)
+        matched_tracks = set()
+        matched_dets = set()
+
+        # Bygg kostnadsmatris
+        costs = []
+        for di, det in enumerate(detections):
+            if "board_x_mm" not in det or det["board_x_mm"] is None:
+                continue
+            for ti, track in enumerate(self.tracks):
+                d = dist_mm(
+                    (det["board_x_mm"], det["board_y_mm"]),
+                    (track.smooth_x, track.smooth_y)
+                )
+                if d < TRACK_MATCH_MM:
+                    costs.append((d, di, ti))
+
+        # Sortera på avstånd, greedy match
+        costs.sort(key=lambda x: x[0])
+        for _, di, ti in costs:
+            if di in matched_dets or ti in matched_tracks:
+                continue
+            det = detections[di]
+            self.tracks[ti].update(
+                det["board_x_mm"], det["board_y_mm"],
+                det["conf"], det["cam"], det
+            )
+            matched_tracks.add(ti)
+            matched_dets.add(di)
+
+        # Skapa nya tracks för omatchade detektioner
+        for di, det in enumerate(detections):
+            if di in matched_dets:
+                continue
+            if "board_x_mm" not in det or det["board_x_mm"] is None:
+                continue
+            if det["conf"] < CONF_DISPLAY_MIN:
+                continue
+            self.tracks.append(DartTrack(
+                det["board_x_mm"], det["board_y_mm"],
+                det["conf"], det["cam"], det
+            ))
+
+        # Åldra omatchade tracks
+        for ti, track in enumerate(self.tracks):
+            if ti not in matched_tracks:
+                track.age += 1
+
+        # Ta bort döda tracks
+        self.tracks = [t for t in self.tracks if not t.is_dead]
+
+        # Returnera bekräftade tracks
+        return [t for t in self.tracks if t.is_confirmed]
+
+    def clear(self):
+        self.tracks.clear()
+
+    @property
+    def confirmed_count(self):
+        return sum(1 for t in self.tracks if t.is_confirmed)
+
+    @property
+    def all_count(self):
+        return len(self.tracks)
 
 
 # ============================================================
@@ -205,7 +371,7 @@ class ScoreBoard:
 
 
 # ============================================================
-# DEDUPLICATION
+# DEDUPLICATION (oförändrad men med ökad radie)
 # ============================================================
 def deduplicate_darts(detections):
     """
@@ -240,13 +406,13 @@ def deduplicate_darts(detections):
 
 
 # ============================================================
-# DART DETECTOR
+# DART DETECTOR (med adaptiv tip-lokalisering)
 # ============================================================
 class DartDetector:
     def __init__(self, model_path, conf=0.10, tip_offset=0.3):
         self.model = YOLO(model_path)
         self.conf = conf
-        self.tip_offset = tip_offset  # 0.0 = bbox botten, 0.5 = mitten, 1.0 = toppen
+        self.tip_offset = tip_offset
         print(f"YOLO: {self.model.names}  tip_offset: {tip_offset}")
 
     def detect(self, frame):
@@ -255,33 +421,61 @@ class DartDetector:
         for box in results[0].boxes:
             conf = float(box.conf[0])
             x1, y1, x2, y2 = box.xyxy[0].tolist()
+            bbox_w = x2 - x1
             bbox_h = y2 - y1
+
+            # ---- Adaptiv tip-lokalisering ----
+            # Aspect ratio ger info om pilens vinkel i bilden.
+            # Hög/smal bbox → vertikal pil → spetsen sitter långt ner (offset ~0.1)
+            # Bred/låg bbox → horisontell pil → spetsen nära mitten (offset ~0.4)
+            aspect = bbox_w / max(bbox_h, 1.0)
+            # Interpolera offset baserat på aspect ratio
+            # aspect < 0.4 → vertikal (offset_low), aspect > 1.0 → horisontell (offset_high)
+            offset_low = max(0.0, self.tip_offset - 0.15)   # mer mot botten
+            offset_high = min(1.0, self.tip_offset + 0.10)   # mer mot mitten
+            adaptive_offset = np.interp(aspect, [0.3, 1.0], [offset_low, offset_high])
+
             tip_x = (x1 + x2) / 2
-            tip_y = y2 - bbox_h * self.tip_offset  # flytta upp från botten
+            tip_y = y2 - bbox_h * adaptive_offset
+
             darts.append({
                 "tip_x": tip_x,
                 "tip_y": tip_y,
                 "conf": conf,
                 "bbox": (int(x1), int(y1), int(x2), int(y2)),
+                "aspect": aspect,
+                "adaptive_offset": adaptive_offset,
             })
         return darts
 
 
 # ============================================================
-# PIPELINE
+# PIPELINE (v3 med tracker + debounce)
 # ============================================================
 class DartVisionPipeline:
-    def __init__(self, model_path, calib_left_path=None, calib_right_path=None, conf=0.10, tip_offset=0.3):
+    def __init__(self, model_path, calib_left_path=None, calib_right_path=None,
+                 conf=0.10, tip_offset=0.3):
         self.detector = DartDetector(model_path, conf, tip_offset)
         self.calib_left = CameraCalibration(calib_left_path) if calib_left_path else None
         self.calib_right = CameraCalibration(calib_right_path) if calib_right_path else None
         self.scoreboard = ScoreBoard()
         self.board_overlay = create_board_overlay()
+        self.tracker = DartTracker()
 
-        self.prev_dart_count = 0
+        # Debounce state
+        self.prev_confirmed_count = 0
+        self.stable_count = 0
+        self.stable_frames = 0
+        self.zero_frames = 0
+
+        # Scored positions (förhindrar dubbelregistrering)
         self.scored_positions = []
 
+        self.debug_mode = False
+        self.frame_num = 0
+
     def process_frame(self, frame):
+        self.frame_num += 1
         h, f_w = frame.shape[:2]
         mid = f_w // 2
 
@@ -299,9 +493,12 @@ class DartVisionPipeline:
                    "tip_cam_x": d["tip_x"], "tip_cam_y": d["tip_y"]}
             if self.calib_left:
                 x_mm, y_mm = self.calib_left.cam_to_board_mm(d["tip_x"], d["tip_y"])
-                det["board_x_mm"] = x_mm
-                det["board_y_mm"] = y_mm
-                det["warped_px"] = self.calib_left.cam_to_warped_px(d["tip_x"], d["tip_y"])
+                if x_mm is not None:  # Homografi-validering passerade
+                    det["board_x_mm"] = x_mm
+                    det["board_y_mm"] = y_mm
+                    det["warped_px"] = self.calib_left.cam_to_warped_px(d["tip_x"], d["tip_y"])
+                else:
+                    det["_invalid_transform"] = True
             all_detections.append(det)
 
         for d in raw_right:
@@ -309,33 +506,42 @@ class DartVisionPipeline:
                    "tip_cam_x": d["tip_x"], "tip_cam_y": d["tip_y"]}
             if self.calib_right:
                 x_mm, y_mm = self.calib_right.cam_to_board_mm(d["tip_x"], d["tip_y"])
-                det["board_x_mm"] = x_mm
-                det["board_y_mm"] = y_mm
-                det["warped_px"] = self.calib_right.cam_to_warped_px(d["tip_x"], d["tip_y"])
+                if x_mm is not None:
+                    det["board_x_mm"] = x_mm
+                    det["board_y_mm"] = y_mm
+                    det["warped_px"] = self.calib_right.cam_to_warped_px(d["tip_x"], d["tip_y"])
+                else:
+                    det["_invalid_transform"] = True
             all_detections.append(det)
 
-        # ---- Dedup ----
+        # ---- Dedup (cross-camera) ----
         has_calib = self.calib_left or self.calib_right
         if has_calib:
-            with_board = [d for d in all_detections if "board_x_mm" in d]
+            with_board = [d for d in all_detections
+                          if "board_x_mm" in d and not d.get("_invalid_transform")]
             without_board = [d for d in all_detections if "board_x_mm" not in d]
+            invalid = [d for d in all_detections if d.get("_invalid_transform")]
             merged = deduplicate_darts(with_board) + without_board
         else:
             merged = all_detections
+            invalid = []
+
+        # ---- Tracker update ----
+        confirmed_tracks = self.tracker.update(merged)
 
         # ---- Annotate ----
         display = frame.copy()
         board = self.board_overlay.copy()
 
-        # Dimmade raw-detektioner (allt YOLO ser)
+        # Dimmade raw-detektioner
         for d in all_detections:
             x1, y1, x2, y2 = d["bbox"]
             xo = d["x_offset"]
+            col = COL_RED if d.get("_invalid_transform") else COL_DIM_GREEN
             cv2.rectangle(display, (x1 + xo - 8, y1 - 8),
-                          (x2 + xo + 8, y2 + 8), COL_DIM_GREEN, 1)
+                          (x2 + xo + 8, y2 + 8), col, 1)
 
-        # Starka merged detektioner
-        scores_this_frame = []
+        # Merged detektioner (alla)
         for d in merged:
             xo = d["x_offset"]
             tx = int(d["tip_cam_x"]) + xo
@@ -343,7 +549,10 @@ class DartVisionPipeline:
             conf = d["conf"]
             x1, y1, x2, y2 = d["bbox"]
 
-            color = COL_GREEN if conf >= 0.20 else COL_YELLOW
+            if conf < CONF_DISPLAY_MIN:
+                continue
+
+            color = COL_GREEN if conf >= CONF_SCORE_MIN else COL_YELLOW
 
             cv2.rectangle(display, (x1 + xo - 12, y1 - 12),
                           (x2 + xo + 12, y2 + 12), color, 2)
@@ -360,64 +569,133 @@ class DartVisionPipeline:
                 lbl_color = COL_ORANGE if score >= 40 else COL_GREEN
                 if score == 0:
                     lbl_color = COL_RED
+                if conf < CONF_SCORE_MIN:
+                    lbl_color = COL_GRAY  # under scoring-tröskel
 
                 cv2.putText(display, label, (tx + 10, ty - 10),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, lbl_color, 2)
 
-                wp = d["warped_px"]
-                cv2.circle(board, wp, 6, COL_RED, -1)
-                cv2.circle(board, wp, 8, COL_WHITE, 1)
-                cv2.putText(board, f"{score}", (wp[0] + 10, wp[1] - 5),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, lbl_color, 1)
+                if self.debug_mode:
+                    cv2.putText(display, f"a={d.get('aspect', 0):.2f} o={d.get('adaptive_offset', 0):.2f}",
+                                (tx + 10, ty + 15),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.35, COL_CYAN, 1)
 
-                scores_this_frame.append({
-                    "zone": zone, "score": score, "is_edge": is_edge,
-                    "cam": d["cam"], "x_mm": x_mm, "y_mm": y_mm,
-                })
+                wp = d.get("warped_px")
+                if wp:
+                    cv2.circle(board, wp, 6, COL_RED, -1)
+                    cv2.circle(board, wp, 8, COL_WHITE, 1)
+                    cv2.putText(board, f"{score}", (wp[0] + 10, wp[1] - 5),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, lbl_color, 1)
             else:
                 cv2.putText(display, f"{conf:.0%} [{cam_label}]", (tx + 10, ty - 10),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1)
 
-        # ---- Throw detection ----
-        current_count = len(merged)
-        self._check_new_darts(scores_this_frame, current_count)
+        # Rita bekräftade tracks på board med smoothad position
+        for track in confirmed_tracks:
+            sp = board_point_to_pixel(track.smooth_x, track.smooth_y)
+            cv2.circle(board, sp, 4, COL_CYAN, -1)
+            if track.scored:
+                cv2.circle(board, sp, 10, COL_GREEN, 1)
 
-        # Info
+        # ---- Debounced throw detection ----
+        self._check_new_darts_debounced(confirmed_tracks)
+
+        # ---- Info overlay ----
         raw_count = len(all_detections)
         dedup_count = len(merged)
-        dedup_txt = f"Raw: {raw_count} -> Dedup: {dedup_count}" if has_calib else f"Darts: {raw_count}"
-        cv2.putText(display, dedup_txt, (10, 30),
+        conf_count = len(confirmed_tracks)
+        inv_count = len(invalid)
+
+        if has_calib:
+            info = f"Raw:{raw_count} Dedup:{dedup_count} Conf:{conf_count}"
+            if inv_count > 0:
+                info += f" Inv:{inv_count}"
+        else:
+            info = f"Darts: {raw_count}"
+
+        cv2.putText(display, info, (10, 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, COL_GREEN, 2)
+
+        if self.debug_mode:
+            dbg = f"Stable:{self.stable_frames}/{STABLE_FRAMES_REQUIRED} Zero:{self.zero_frames}"
+            cv2.putText(display, dbg, (10, 55),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, COL_CYAN, 1)
+            trk = f"Tracks: {self.tracker.all_count} (conf: {self.tracker.confirmed_count})"
+            cv2.putText(display, trk, (10, 75),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, COL_CYAN, 1)
 
         sb = self.scoreboard.draw(height=h)
         return display, board, sb
 
-    def _check_new_darts(self, scores_this_frame, current_count):
-        if current_count > self.prev_dart_count and scores_this_frame:
-            for s in scores_this_frame:
-                pos = (s["x_mm"], s["y_mm"])
+    def _check_new_darts_debounced(self, confirmed_tracks):
+        """
+        Debounced kast-registrering:
+        1. Räkna bekräftade tracks
+        2. Kräv STABLE_FRAMES_REQUIRED med samma antal innan scoring
+        3. Registrera bara tracks med conf >= CONF_SCORE_MIN som inte redan scorats
+        4. Kräv ZERO_FRAMES_REQUIRED med 0 tracks för ny runda
+        """
+        current_count = len(confirmed_tracks)
+
+        # ---- Stabilitetskontroll ----
+        if current_count == self.stable_count:
+            self.stable_frames += 1
+        else:
+            self.stable_count = current_count
+            self.stable_frames = 0
+
+        # ---- Ny runda: kräv flera frames med 0 darts ----
+        if current_count == 0:
+            self.zero_frames += 1
+            if self.zero_frames >= ZERO_FRAMES_REQUIRED and self.prev_confirmed_count > 0:
+                self.scored_positions.clear()
+                self.tracker.clear()
+                self.prev_confirmed_count = 0
+                self.stable_count = 0
+                self.stable_frames = 0
+                print("  --- Ny runda ---")
+            return
+        else:
+            self.zero_frames = 0
+
+        # ---- Vänta tills stabilt ----
+        if self.stable_frames < STABLE_FRAMES_REQUIRED:
+            return
+
+        # ---- Kolla om nya pilar att registrera ----
+        if current_count > self.prev_confirmed_count:
+            for track in confirmed_tracks:
+                if track.scored:
+                    continue
+                if track.conf < CONF_SCORE_MIN:
+                    continue
+
+                pos = (track.smooth_x, track.smooth_y)
+
+                # Kolla mot redan registrerade positioner
                 is_new = True
                 for prev_pos in self.scored_positions:
-                    if dist_mm(pos, prev_pos) < DEDUP_DISTANCE_MM:
+                    if dist_mm(pos, prev_pos) < SCORED_DEDUP_MM:
                         is_new = False
                         break
+
                 if is_new:
-                    self.scoreboard.add_throw(s["zone"], s["score"], s["is_edge"], s["cam"])
+                    zone, score, mult, sector, r_mm, angle, is_edge = \
+                        score_from_mm(track.smooth_x, track.smooth_y)
+                    self.scoreboard.add_throw(zone, score, is_edge, track.cam)
                     self.scored_positions.append(pos)
-                    print(f"  KAST: {s['zone']} = {s['score']} ({s['cam']})")
+                    track.scored = True
+                    print(f"  KAST: {zone} = {score} ({track.cam}) "
+                          f"[conf={track.conf:.2f}, hits={track.hits}]")
 
-        if current_count == 0 and self.prev_dart_count > 0:
-            self.scored_positions.clear()
-            print("  --- Ny runda ---")
-
-        self.prev_dart_count = current_count
+            self.prev_confirmed_count = current_count
 
 
 # ============================================================
 # MAIN
 # ============================================================
 def main():
-    parser = argparse.ArgumentParser(description="DartVision v2 (dedup)")
+    parser = argparse.ArgumentParser(description="DartVision v3 (optimerad)")
     parser.add_argument("--video", type=str)
     parser.add_argument("--camera", type=int)
     parser.add_argument("--model", type=str, default="best.pt")
@@ -425,8 +703,9 @@ def main():
     parser.add_argument("--calib_right", type=str, default=None)
     parser.add_argument("--conf", type=float, default=0.10)
     parser.add_argument("--tip_offset", type=float, default=0.3,
-                        help="Spets-offset i bbox (0.0=botten, 0.5=mitten, 1.0=toppen)")
+                        help="Spets-offset i bbox (0.0=botten, 0.5=mitten)")
     parser.add_argument("--save", type=str)
+    parser.add_argument("--debug", action="store_true", help="Visa debug-info")
     args = parser.parse_args()
 
     if args.calib_left is None and Path("calib_left.json").exists():
@@ -437,7 +716,7 @@ def main():
         print(f"Auto: {args.calib_right}")
 
     if not args.calib_left and not args.calib_right:
-        print("OBS: Ingen kalibrering – kor utan scoring/dedup.\n")
+        print("OBS: Ingen kalibrering – kör utan scoring/dedup.\n")
 
     pipeline = DartVisionPipeline(
         model_path=args.model,
@@ -446,6 +725,7 @@ def main():
         conf=args.conf,
         tip_offset=args.tip_offset,
     )
+    pipeline.debug_mode = args.debug
 
     if args.video:
         cap = cv2.VideoCapture(args.video)
@@ -469,11 +749,17 @@ def main():
         writer = cv2.VideoWriter(args.save, cv2.VideoWriter_fourcc(*'mp4v'),
                                  fps, (comp_w, comp_h))
 
-    print(f"\nDartVision v2")
-    print(f"  Feed: {f_w}x{f_h} @ {fps:.0f}fps")
-    print(f"  Conf: {args.conf}  Dedup: {DEDUP_DISTANCE_MM}mm  Tip: {args.tip_offset}")
-    print(f"  Kalib: L={'JA' if args.calib_left else 'NEJ'} R={'JA' if args.calib_right else 'NEJ'}")
-    print(f"\n  q=avsluta  +/-=conf  w/s=tip upp/ner  r=reset  p=paus\n")
+    print(f"\nDartVision v3 (optimerad)")
+    print(f"  Feed:    {f_w}x{f_h} @ {fps:.0f}fps")
+    print(f"  Conf:    display>{CONF_DISPLAY_MIN}  score>{CONF_SCORE_MIN}")
+    print(f"  Dedup:   {DEDUP_DISTANCE_MM}mm  Scored-dedup: {SCORED_DEDUP_MM}mm")
+    print(f"  Tracker: match={TRACK_MATCH_MM}mm  min_hits={TRACK_MIN_HITS}  "
+          f"max_age={TRACK_MAX_AGE}  alpha={TRACK_SMOOTH_ALPHA}")
+    print(f"  Stabil:  {STABLE_FRAMES_REQUIRED} frames  Zero: {ZERO_FRAMES_REQUIRED} frames")
+    print(f"  Tip:     offset={args.tip_offset} (adaptiv)")
+    print(f"  Kalib:   L={'JA' if args.calib_left else 'NEJ'} "
+          f"R={'JA' if args.calib_right else 'NEJ'}")
+    print(f"\n  q=avsluta  +/-=conf  w/s=tip  r=reset  p=paus  d=debug  t=tracker\n")
 
     paused = False
 
@@ -517,14 +803,28 @@ def main():
         elif key == ord('r'):
             pipeline.scoreboard = ScoreBoard()
             pipeline.scored_positions.clear()
-            pipeline.prev_dart_count = 0
+            pipeline.tracker.clear()
+            pipeline.prev_confirmed_count = 0
+            pipeline.stable_count = 0
+            pipeline.stable_frames = 0
+            pipeline.zero_frames = 0
             print("  Score reset!")
         elif key == ord('w'):
             pipeline.detector.tip_offset = min(1.0, pipeline.detector.tip_offset + 0.05)
-            print(f"  tip_offset = {pipeline.detector.tip_offset:.2f} (spets hogre)")
+            print(f"  tip_offset = {pipeline.detector.tip_offset:.2f}")
         elif key == ord('s'):
             pipeline.detector.tip_offset = max(0.0, pipeline.detector.tip_offset - 0.05)
-            print(f"  tip_offset = {pipeline.detector.tip_offset:.2f} (spets lagre)")
+            print(f"  tip_offset = {pipeline.detector.tip_offset:.2f}")
+        elif key == ord('d'):
+            pipeline.debug_mode = not pipeline.debug_mode
+            print(f"  Debug: {'ON' if pipeline.debug_mode else 'OFF'}")
+        elif key == ord('t'):
+            print(f"  Tracker: {pipeline.tracker.all_count} tracks, "
+                  f"{pipeline.tracker.confirmed_count} confirmed")
+            for t in pipeline.tracker.tracks:
+                zone = score_from_mm(t.smooth_x, t.smooth_y)[0]
+                print(f"    #{t.id}: {zone} conf={t.conf:.2f} hits={t.hits} "
+                      f"age={t.age} scored={t.scored}")
 
     cap.release()
     if writer:
