@@ -10,6 +10,7 @@ import AroundTheClock from "./AroundTheClock"
 import HeatmapPage from "./HeatmapPage"
 import TournamentSetup from "./TournamentSetup"
 import TournamentBracket from "./TournamentBracket"
+import LiveScoring from "./LiveScoring"
 
 export default function App() {
   const [page, setPage] = useState("lobby")
@@ -35,10 +36,6 @@ export default function App() {
     setPage(p)
   }
 
-  /* Uppdatera bracket direkt i tournamentConfig när en turneringsmatch är klar.
-     Detta görs här i App.jsx istället för via ref-callback, eftersom
-     TournamentBracket är unmountad under matchen och ref-callbacken
-     pekar på en stale funktion som inte kan uppdatera state. */
   const handleTournamentMatchComplete = (winner, legsWon) => {
     if (tournamentMatchId) {
       setTournamentConfig((prev) => {
@@ -56,7 +53,6 @@ export default function App() {
           })
         )
 
-        /* Propagera vinnare till nästa runda */
         for (let r = 0; r < newRounds.length - 1; r++) {
           newRounds[r].forEach((match, mi) => {
             if (match.winner) {
@@ -81,10 +77,10 @@ export default function App() {
   if (page === "profile") return <ProfilePage navigate={navigate} user={user} setUser={setUser} />
   if (page === "heatmap") return <HeatmapPage navigate={navigate} />
   if (page === "calibrate") return <CalibrationPage navigate={navigate} />
+  if (page === "live") return <LiveScoring navigate={navigate} />
   if (page === "match") return <MatchSetup navigate={navigate} user={user} />
   if (page === "match-game" && matchConfig) return <MatchGame navigate={navigate} matchConfig={matchConfig} />
 
-  /* Tournament match — samma MatchGame men med callback för resultat */
   if (page === "tournament-match" && matchConfig) {
     return (
       <MatchGame
