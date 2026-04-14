@@ -59,12 +59,20 @@ def create_app() -> FastAPI:
 app = create_app()
 
 
+def _camera_arg(value: str):
+    """Tolka kameraargument: heltal för USB-kamera, sträng för IP/URL-kamera."""
+    try:
+        return int(value)
+    except ValueError:
+        return value
+
+
 def main():
     parser = argparse.ArgumentParser(description="DartVision Server")
-    parser.add_argument("--camera", type=int, default=0,
-                        help="Primär kamera-index (default: 0)")
-    parser.add_argument("--camera2", type=int, default=None,
-                        help="Sekundär kamera-index (None = dual-feed)")
+    parser.add_argument("--camera", type=_camera_arg, default=0,
+                        help="Primär kamera: index (0) eller URL (http://...)")
+    parser.add_argument("--camera2", type=_camera_arg, default=None,
+                        help="Sekundär kamera: index eller URL (None = dual-feed)")
     parser.add_argument("--model", type=str, default=DEFAULT_MODEL,
                         help="Sökväg till YOLO-modell (default: best.pt)")
     parser.add_argument("--calib_left", type=str, default=None,

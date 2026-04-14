@@ -50,8 +50,10 @@ async def websocket_scoring(ws: WebSocket):
 
             await asyncio.sleep(0.1)
 
-    except (WebSocketDisconnect, Exception):
+    except WebSocketDisconnect:
         pass
+    except Exception as e:
+        print(f"❌ WS /ws/scoring fel: {type(e).__name__}: {e}")
 
 
 @router.post("/api/reset")

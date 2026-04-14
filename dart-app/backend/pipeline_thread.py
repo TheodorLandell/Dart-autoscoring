@@ -111,20 +111,23 @@ def run_pipeline(
         _, board_jpg = cv2.imencode('.jpg', board, [cv2.IMWRITE_JPEG_QUALITY, 80])
 
         # Bygg dart-state från tracker
+        # OBS: Explicit cast till Python-typer — numpy float64/bool är inte JSON-serialiserbara
         darts = []
         for track in pipeline.tracker.tracks:
             if track.is_confirmed:
                 zi = score_from_mm(track.smooth_x, track.smooth_y)
                 sx, sy = mm_to_svg(track.smooth_x, track.smooth_y)
                 darts.append({
-                    "zone": zi[0], "score": zi[1],
-                    "x_mm": round(track.smooth_x, 1),
-                    "y_mm": round(track.smooth_y, 1),
-                    "svg_x": sx, "svg_y": sy,
-                    "cam": track.cam,
-                    "conf": round(track.conf, 2),
-                    "scored": track.scored,
-                    "is_edge": zi[6],
+                    "zone": str(zi[0]),
+                    "score": int(zi[1]),
+                    "x_mm": float(round(float(track.smooth_x), 1)),
+                    "y_mm": float(round(float(track.smooth_y), 1)),
+                    "svg_x": float(sx),
+                    "svg_y": float(sy),
+                    "cam": str(track.cam) if track.cam is not None else None,
+                    "conf": float(round(float(track.conf), 2)),
+                    "scored": bool(track.scored),
+                    "is_edge": bool(zi[6]),
                 })
 
         # Nya kast-events (för WebSocket push)
@@ -133,12 +136,12 @@ def run_pipeline(
         for zone, score, is_edge, cam in current_throws[prev_throw_count:]:
             new_events.append({
                 "type": "throw",
-                "zone": zone,
-                "score": score,
-                "is_edge": is_edge,
-                "cam": cam,
-                "total": pipeline.scoreboard.total,
-                "timestamp": time.time(),
+                "zone": str(zone),
+                "score": int(score),
+                "is_edge": bool(is_edge),
+                "cam": str(cam) if cam is not None else None,
+                "total": int(pipeline.scoreboard.total),
+                "timestamp": float(time.time()),
             })
         prev_throw_count = len(current_throws)
 
@@ -152,7 +155,7 @@ def run_pipeline(
 
         # Platta kast-listan
         throws_list = [
-            {"zone": z, "score": s, "is_edge": e, "cam": c}
+            {"zone": str(z), "score": int(s), "is_edge": bool(e), "cam": str(c) if c is not None else None}
             for z, s, e, c in current_throws
         ]
 

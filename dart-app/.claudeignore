@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Lock files (stora, ingen nytta för Claude)
+package-lock.json
+
+# Databas
+*.db
+
+# Hemligheter
+.dartvision_secret
+
+# Kalibreringsdata (binär/genererad)
+calib_left.json
+calib_right.json
+
+# Bilder och video
+*.png
+*.jpg
+*.jpeg
+*.avi
+*.mp4
+
+# YOLO-modell (binär)
+*.pt
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Assets-mapp (ikoner etc)
+src/assets/
