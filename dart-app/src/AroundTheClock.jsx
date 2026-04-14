@@ -1,76 +1,14 @@
-import { useState, useRef, useMemo } from "react";
+import { useState, useEffect } from "react";
+import useDartVision from "./useDartVision";
 
 /*
   ┌─────────────────────────────────────────────────────────────┐
-  │  AROUND THE CLOCK                                          │
+  │  AROUND THE CLOCK — AUTO-SCORING ONLY                     │
   │                                                             │
-  │  REGLER:                                                    │
-  │  - Träffa 1→20→Bull i ordning (eller omvänt/random)       │
-  │  - Välj variant: Any / Single / Double / Treble            │
-  │    Any = träffa valfri yta på numret                       │
-  │    Single/Double/Treble = måste träffa den specifika ytan  │
-  │  - Avsluta med: Single bull (25) eller Bullseye (50)       │
-  │  - Stats: pilar kastade, träffar, accuracy %               │
-  │                                                             │
-  │  SETUP-SIDA:                                                │
-  │  - Variant: Any / Single / Double / Treble                 │
-  │  - Avsluta med: Single bull / Bullseye                     │
-  │  - Ordning: Låg→hög / Hög→låg / Random                    │
-  │  - Starta-knapp                                            │
-  │                                                             │
-  │  GAMEPLAY:                                                  │
-  │  - Aktuellt mål (nummer + vilken yta)                      │
-  │  - Dartboard — klicka för att kasta                        │
-  │  - Pilar kastade / Träffar / Accuracy %                    │
-  │  - Progress-indikator (vilka nummer som klarats)           │
-  │                                                             │
-  │  Backend:                                                   │
-  │  - POST /api/game/atc/create { variant, finish, order }   │
-  │  - POST /api/game/atc/{id}/throw { zone, multiplier }     │
-  │  - Spara: total pilar, accuracy, tid                       │
+  │  Manuell dartboard borttagen. Scoring sker via kamera.     │
+  │  Träff/Miss-knappar finns för korrigeringar.               │
   └─────────────────────────────────────────────────────────────┘
 */
-
-/* ============ ZONE DETECTION ============ */
-const BN=[20,1,18,4,13,6,10,15,2,17,3,19,7,16,8,11,14,9,12,5];
-function getZone(x,y,cx,cy){
-  const dist=Math.sqrt((x-cx)**2+(y-cy)**2);
-  const angle=((Math.atan2(y-cy,x-cx)*180)/Math.PI+360+99)%360;
-  const si=Math.floor(angle/18);const n=BN[si]||20;
-  if(dist<=12.7)return{zone:"D-Bull",value:50,label:"D-Bull",multiplier:2,number:25};
-  if(dist<=31.8)return{zone:"Bull",value:25,label:"Bull",multiplier:1,number:25};
-  if(dist>=95&&dist<=99)return{zone:`T${n}`,value:n*3,label:`T${n}`,multiplier:3,number:n};
-  if(dist>=53&&dist<=57)return{zone:`D${n}`,value:n*2,label:`D${n}`,multiplier:2,number:n};
-  if(dist>170)return{zone:"Miss",value:0,label:"Miss",multiplier:0,number:0};
-  return{zone:`S${n}`,value:n,label:`S${n}`,multiplier:1,number:n};
-}
-
-/* ============ DARTBOARD ============ */
-function Board({darts,onClick,highlightNumber,highlightType}){
-  const ref=useRef(null);const cx=200,cy=200,R=170;
-  const click=(e)=>{const r=ref.current.getBoundingClientRect();const x=((e.clientX-r.left)/r.width)*400;const y=((e.clientY-r.top)/r.height)*400;const dist=Math.sqrt((x-cx)**2+(y-cy)**2);if(dist<=R+5)onClick({...getZone(x,y,cx,cy),x,y});};
-  return(
-    <svg ref={ref} viewBox="0 0 400 400" className="w-full max-w-sm cursor-crosshair" onClick={click} style={{filter:"drop-shadow(0 0 30px rgba(0,0,0,0.5))"}}>
-      <circle cx={cx} cy={cy} r={R} fill="#1a1a1a" stroke="#333" strokeWidth="2"/>
-      {BN.map((num,i)=>{const sa=(i*18-99)*(Math.PI/180),ea=((i+1)*18-99)*(Math.PI/180);const ev=i%2===0;
-        const isTarget=num===highlightNumber&&highlightNumber<=20;
-        return[{i:99,o:R,f:ev?"#1a1a1a":"#f0e6d3",type:"S"},{i:95,o:99,f:ev?"#e8373e":"#1b8a42",type:"T_outer"},{i:57,o:95,f:ev?"#1a1a1a":"#f0e6d3",type:"S"},{i:53,o:57,f:ev?"#e8373e":"#1b8a42",type:"D"}].map((r,ri)=>{
-          const x1=cx+r.i*Math.cos(sa),y1=cy+r.i*Math.sin(sa),x2=cx+r.o*Math.cos(sa),y2=cy+r.o*Math.sin(sa),x3=cx+r.o*Math.cos(ea),y3=cy+r.o*Math.sin(ea),x4=cx+r.i*Math.cos(ea),y4=cy+r.i*Math.sin(ea);
-          let fill=r.f;
-          if(isTarget&&highlightType==="any")fill=ri===0||ri===2?"rgba(139,92,246,0.3)":ri===1?"rgba(139,92,246,0.5)":"rgba(139,92,246,0.5)";
-          else if(isTarget&&highlightType==="S"&&(ri===0||ri===2))fill="rgba(139,92,246,0.4)";
-          else if(isTarget&&highlightType==="D"&&ri===3)fill="rgba(139,92,246,0.5)";
-          else if(isTarget&&highlightType==="T"&&ri===1)fill="rgba(139,92,246,0.5)";
-          return<path key={`${i}-${ri}`} d={`M${x1} ${y1}L${x2} ${y2}A${r.o} ${r.o} 0 0 1 ${x3} ${y3}L${x4} ${y4}A${r.i} ${r.i} 0 0 0 ${x1} ${y1}Z`} fill={fill} stroke="#333" strokeWidth="0.5"/>;
-        });})}
-      {/* Bull highlight */}
-      <circle cx={cx} cy={cy} r={31.8} fill={highlightNumber===25?"rgba(139,92,246,0.4)":"#1b8a42"} stroke="#333" strokeWidth="0.5"/>
-      <circle cx={cx} cy={cy} r={12.7} fill={highlightNumber===25?"rgba(139,92,246,0.6)":"#e8373e"} stroke="#333" strokeWidth="0.5"/>
-      {BN.map((n,i)=>{const a=(i*18-90)*(Math.PI/180);const isT=n===highlightNumber;return<text key={n} x={cx+(R+18)*Math.cos(a)} y={cy+(R+18)*Math.sin(a)} textAnchor="middle" dominantBaseline="central" fill={isT?"#A78BFA":"rgba(255,255,255,0.7)"} fontSize={isT?"16":"13"} fontWeight={isT?"800":"600"} fontFamily="'Rajdhani',sans-serif">{n}</text>;})}
-      {darts.map((d,i)=>{const isHit=d.hit;return(<g key={i}><circle cx={d.x+2} cy={d.y+2} r="5" fill="rgba(0,0,0,0.3)"/><circle cx={d.x} cy={d.y} r="4" fill={isHit?"#8B5CF6":"rgba(255,255,255,0.2)"} stroke={isHit?"#fff":"rgba(255,255,255,0.3)"} strokeWidth="1.5"/></g>);})}
-    </svg>
-  );
-}
 
 /* ============ OPTION BUTTON ============ */
 function Opt({label,desc,selected,onClick,accent="#8B5CF6"}){
@@ -115,7 +53,6 @@ function ATCSetup({onStart,navigate}){
             Träffa varje nummer på darttavlan i ordning, från 1 till 20, avsluta med bull. Antal pilar och träffsäkerhet räknas.
           </p>
 
-          {/* Variant */}
           <div className="mb-6">
             <span className="text-xs font-bold uppercase tracking-widest block mb-3" style={{color:"rgba(255,255,255,0.3)"}}>Variant</span>
             <div className="grid grid-cols-2 gap-2">
@@ -126,7 +63,6 @@ function ATCSetup({onStart,navigate}){
             </div>
           </div>
 
-          {/* Finish */}
           <div className="mb-6">
             <span className="text-xs font-bold uppercase tracking-widest block mb-3" style={{color:"rgba(255,255,255,0.3)"}}>Avsluta med</span>
             <div className="grid grid-cols-2 gap-2">
@@ -135,7 +71,6 @@ function ATCSetup({onStart,navigate}){
             </div>
           </div>
 
-          {/* Order */}
           <div>
             <span className="text-xs font-bold uppercase tracking-widest block mb-3" style={{color:"rgba(255,255,255,0.3)"}}>Ordning</span>
             <div className="grid grid-cols-3 gap-2">
@@ -160,53 +95,37 @@ function ATCSetup({onStart,navigate}){
   );
 }
 
-/* ============ GAMEPLAY ============ */
+/* ============ GAMEPLAY — AUTO-SCORING ONLY ============ */
 function ATCGame({config,navigate}){
   const{variant,finish,order}=config;
 
-  /* Bygg nummerlista */
-  const numbers=useMemo(()=>{
+  /* Bygg nummerlista (en gång vid mount — random är OK i useState-initializer) */
+  const [numbers] = useState(() => {
     let nums=Array.from({length:20},(_,i)=>i+1);
     if(order==="high-low")nums.reverse();
     else if(order==="random")nums.sort(()=>Math.random()-0.5);
-    nums.push(25); // bull sist
+    nums.push(25);
     return nums;
-  },[order]);
+  });
 
   const [currentIdx,setCurrentIdx]=useState(0);
   const [totalDarts,setTotalDarts]=useState(0);
   const [hits,setHits]=useState(0);
-  const [dartPos,setDartPos]=useState([]);
   const [msg,setMsg]=useState(null);
   const [completed,setCompleted]=useState(false);
   const [undoStack,setUndoStack]=useState([]);
 
   const currentTarget=numbers[currentIdx];
   const accuracy=totalDarts===0?0:Math.round((hits/totalDarts)*100);
-  const isFinished=completed;
-
-  /* Vilken typ av zon krävs? */
-  const getHighlightType=()=>{
-    if(currentTarget===25)return"any"; // bull
-    if(variant==="any")return"any";
-    if(variant==="single")return"S";
-    if(variant==="double")return"D";
-    if(variant==="treble")return"T";
-    return"any";
-  };
 
   const flash=(text,type)=>{setMsg({text,type});setTimeout(()=>setMsg(null),2000);};
 
   const isHit=(dartInfo)=>{
     const{number,multiplier,zone}=dartInfo;
-
-    /* Bull target */
     if(currentTarget===25){
       if(finish==="bullseye")return zone==="D-Bull";
       return zone==="D-Bull"||zone==="Bull";
     }
-
-    /* Number target */
     if(number!==currentTarget)return false;
     if(variant==="any")return true;
     if(variant==="single"&&multiplier===1)return true;
@@ -217,12 +136,9 @@ function ATCGame({config,navigate}){
 
   const handleThrow=(dartInfo)=>{
     if(completed)return;
-
     setUndoStack(p=>[...p,{currentIdx,totalDarts,hits}]);
-
     const hit=isHit(dartInfo);
     setTotalDarts(d=>d+1);
-    if(dartInfo.x)setDartPos(p=>[...p,{x:dartInfo.x,y:dartInfo.y,hit}]);
 
     if(hit){
       setHits(h=>h+1);
@@ -233,19 +149,48 @@ function ATCGame({config,navigate}){
         const next=numbers[currentIdx+1];
         flash(`Träff! Nästa: ${next===25?"Bull":next}`,"good");
         setCurrentIdx(i=>i+1);
-        setDartPos([]);
       }
     } else {
       flash("Miss!","bad");
     }
   };
 
+  /* Manuell "Träff"-knapp för korrigering */
+  const handleManualHit=()=>{
+    if(completed)return;
+    setUndoStack(p=>[...p,{currentIdx,totalDarts,hits}]);
+    setTotalDarts(d=>d+1);
+    setHits(h=>h+1);
+    if(currentIdx+1>=numbers.length){
+      setCompleted(true);
+      flash("Klart! Alla nummer avklarade!","good");
+    } else {
+      const next=numbers[currentIdx+1];
+      flash(`Manuell träff! Nästa: ${next===25?"Bull":next}`,"good");
+      setCurrentIdx(i=>i+1);
+    }
+  };
+
+  /* ===== LIVE AUTO-SCORING (alltid aktiverad) ===== */
+  const handleLiveThrow = (dartInfo) => {
+    if (completed) return;
+    handleThrow(dartInfo);
+  };
+
+  const { connected, resetBackend } = useDartVision({
+    onThrow: handleLiveThrow,
+    enabled: !completed,
+  });
+
+  useEffect(() => {
+    resetBackend();
+  }, [resetBackend]);
+
   const handleUndo=()=>{
     if(!undoStack.length)return;
     const snap=undoStack[undoStack.length-1];
     setUndoStack(p=>p.slice(0,-1));
     setCurrentIdx(snap.currentIdx);setTotalDarts(snap.totalDarts);setHits(snap.hits);
-    setDartPos(p=>p.slice(0,-1));
     setCompleted(false);
     flash("↩ Ångrade","info");
   };
@@ -265,7 +210,12 @@ function ATCGame({config,navigate}){
         <div className="flex-1 text-center">
           <span className="text-xl font-extrabold uppercase tracking-wider" style={{color:"#8B5CF6"}}>Around the Clock</span>
         </div>
-        <div className="w-20"/>
+        {/* Connection status */}
+        <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg"
+          style={{background:connected?"rgba(139,92,246,0.1)":"rgba(239,68,68,0.1)",border:connected?"1px solid rgba(139,92,246,0.25)":"1px solid rgba(239,68,68,0.25)"}}>
+          <div className="w-2 h-2 rounded-full" style={{background:connected?"#8B5CF6":"#EF4444",boxShadow:connected?"0 0 8px rgba(139,92,246,0.5)":"none",animation:connected?"none":"pulse 1.5s ease-in-out infinite"}}/>
+          <span className="text-[10px] font-bold uppercase tracking-widest" style={{color:connected?"#8B5CF6":"#EF4444"}}>{connected?"Live":"..."}</span>
+        </div>
       </header>
 
       <main className="relative z-10 flex flex-col items-center px-4 pb-12">
@@ -314,7 +264,7 @@ function ATCGame({config,navigate}){
           </div>
         </div>
 
-        {/* Message — always reserverad plats, ingen hop */}
+        {/* Message */}
         <div className="w-full max-w-md" style={{minHeight:44}}>
           <div className="flex items-center justify-center" style={{height:44}}>
             {msg&&(
@@ -328,12 +278,17 @@ function ATCGame({config,navigate}){
           </div>
         </div>
 
-        {/* ===== DARTBOARD ===== */}
+        {/* Väntar-indikator */}
         {!completed&&(
-          <Board darts={dartPos} onClick={handleThrow} highlightNumber={currentTarget} highlightType={getHighlightType()}/>
+          <div className="mb-4 p-6 rounded-2xl w-full max-w-md text-center" style={{background:"rgba(139,92,246,0.05)",border:"1px solid rgba(139,92,246,0.15)"}}>
+            <div className="w-3 h-3 rounded-full mx-auto mb-3" style={{background:connected?"#8B5CF6":"#EF4444",animation:"pulse 1.5s ease-in-out infinite"}}/>
+            <span className="text-sm" style={{color:"rgba(255,255,255,0.4)"}}>
+              {connected?"Väntar på kast...":"Ansluter till kamera..."}
+            </span>
+          </div>
         )}
 
-        {/* Ångra */}
+        {/* Korrigeringsknappar */}
         {!completed&&(
           <div className="flex items-center gap-3 mt-4">
             <button onClick={handleUndo} disabled={!undoStack.length}
@@ -342,6 +297,20 @@ function ATCGame({config,navigate}){
               onMouseEnter={(e)=>{if(undoStack.length)e.currentTarget.style.color="#8B5CF6";}}
               onMouseLeave={(e)=>{if(undoStack.length)e.currentTarget.style.color="rgba(255,255,255,0.4)";}}>
               ↩ Ångra
+            </button>
+            <button onClick={handleManualHit}
+              className="px-5 py-2.5 rounded-xl text-sm font-semibold uppercase tracking-widest transition-all duration-200"
+              style={{background:"rgba(139,92,246,0.1)",color:"#8B5CF6",border:"1px solid rgba(139,92,246,0.25)"}}
+              onMouseEnter={(e)=>e.currentTarget.style.background="rgba(139,92,246,0.2)"}
+              onMouseLeave={(e)=>e.currentTarget.style.background="rgba(139,92,246,0.1)"}>
+              Träff ✓
+            </button>
+            <button onClick={()=>handleThrow({zone:"Miss",value:0,label:"Miss",multiplier:0,number:0})}
+              className="px-5 py-2.5 rounded-xl text-sm font-semibold uppercase tracking-widest transition-all duration-200"
+              style={{background:"rgba(239,68,68,0.08)",color:"#EF4444",border:"1px solid rgba(239,68,68,0.2)"}}
+              onMouseEnter={(e)=>e.currentTarget.style.background="rgba(239,68,68,0.15)"}
+              onMouseLeave={(e)=>e.currentTarget.style.background="rgba(239,68,68,0.08)"}>
+              Miss ✗
             </button>
           </div>
         )}
@@ -372,6 +341,7 @@ function ATCGame({config,navigate}){
         </div>
       </main>
 
+      <style>{`@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }`}</style>
       <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet"/>
     </div>
   );

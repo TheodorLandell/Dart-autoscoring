@@ -113,8 +113,7 @@ export default function ProfilePage({ navigate, user, setUser }) {
   const isNewUser = !user.stats || user.stats.matches_played === 0;
 
   const handleLogout = () => {
-    /* Backend: POST /api/auth/logout
-       localStorage.removeItem('dart_token') */
+    localStorage.removeItem("dart_token");
     setUser(null);
     navigate("lobby");
   };

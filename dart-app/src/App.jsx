@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import DartLobby from "./DartLobby"
 import LoginPage from "./LoginPage"
 import CalibrationPage from "./CalibrationPage"
@@ -12,12 +12,25 @@ import TournamentSetup from "./TournamentSetup"
 import TournamentBracket from "./TournamentBracket"
 import LiveScoring from "./LiveScoring"
 
+
 export default function App() {
   const [page, setPage] = useState("lobby")
   const [user, setUser] = useState(null)
   const [matchConfig, setMatchConfig] = useState(null)
   const [tournamentConfig, setTournamentConfig] = useState(null)
   const [tournamentMatchId, setTournamentMatchId] = useState(null)
+
+  /* ===== AUTO-RESTORE SESSION ===== */
+  useEffect(() => {
+    const token = localStorage.getItem("dart_token")
+    if (!token) return
+    fetch("http://localhost:8000/api/auth/me", {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((res) => (res.ok ? res.json() : Promise.reject()))
+      .then((data) => setUser(data.user))
+      .catch(() => localStorage.removeItem("dart_token"))
+  }, [])
 
   const navigate = (p, data) => {
     if (p === "tournament-bracket" && data) {
@@ -77,7 +90,7 @@ export default function App() {
   if (page === "profile") return <ProfilePage navigate={navigate} user={user} setUser={setUser} />
   if (page === "heatmap") return <HeatmapPage navigate={navigate} />
   if (page === "calibrate") return <CalibrationPage navigate={navigate} />
-  if (page === "live") return <LiveScoring navigate={navigate} />
+  if (page === "live-scoring") return <LiveScoring navigate={navigate} />
   if (page === "match") return <MatchSetup navigate={navigate} user={user} />
   if (page === "match-game" && matchConfig) return <MatchGame navigate={navigate} matchConfig={matchConfig} />
 

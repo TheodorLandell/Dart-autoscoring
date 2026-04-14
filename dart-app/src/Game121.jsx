@@ -1,34 +1,12 @@
-import { useState, useRef, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
+import useDartVision from "./useDartVision";
 
 /*
   ┌─────────────────────────────────────────────────────────────┐
-  │  121 — Checkout Challenge                                  │
+  │  121 — Checkout Challenge — AUTO-SCORING ONLY              │
   │                                                             │
-  │  REGLER:                                                    │
-  │  - Starta på 121 poäng                                     │
-  │  - Checka ut (nå exakt 0 med dubbel) inom valt antal pilar │
-  │  - Lyckas → nivå ökar (122, 123, 124...)                   │
-  │  - Misslyckas (alla pilar slut) → nivå sjunker             │
-  │  - På nivå 2 (lägsta) och misslyckas → börja om på 2      │
-  │  - Bust (under 0 eller kvar 1) → pilen räknas, inget avdrag│
-  │                                                             │
-  │  LAYOUT:                                                    │
-  │  - Nivå + poäng kvar + pilar kvar överst                   │
-  │  - Checkout-förslag                                        │
-  │  - Dartboard (klicka för kast)                             │
-  │  - Score editor (samma tabs som Match)                     │
-  │  - Ångra / Reset / Inställningar                           │
-  │  - Historik (senaste omgångar)                              │
-  │                                                             │
-  │  INSTÄLLNINGAR (i spelet):                                 │
-  │  - Antal pilar per omgång (default 9)                      │
-  │  - Hoppa till nivå                                         │
-  │                                                             │
-  │  Backend:                                                   │
-  │  - POST /api/game/121/create { darts_per_round }           │
-  │  - POST /api/game/121/{id}/throw { zone, multiplier }     │
-  │  - GET  /api/game/121/{id}/state                           │
-  │  - Spara: högsta nivå nådd, sessionshistorik               │
+  │  Manuell dartboard borttagen. Scoring sker via kamera.     │
+  │  ScoreEditor finns kvar för korrigeringar.                 │
   └─────────────────────────────────────────────────────────────┘
 */
 
@@ -37,41 +15,7 @@ const CK={170:["T20 T20 Bull"],167:["T20 T19 Bull"],164:["T20 T18 Bull"],161:["T
 
 function getCheckout(s){const c=CK[s];if(!c||!c.length)return null;return c[0];}
 
-/* ============ ZONE DETECTION ============ */
-const BN=[20,1,18,4,13,6,10,15,2,17,3,19,7,16,8,11,14,9,12,5];
-function getZone(x,y,cx,cy){
-  const dist=Math.sqrt((x-cx)**2+(y-cy)**2);
-  const angle=((Math.atan2(y-cy,x-cx)*180)/Math.PI+360+99)%360;
-  const si=Math.floor(angle/18);const n=BN[si]||20;
-  if(dist<=12.7)return{zone:"D-Bull",value:50,label:"D-Bull",multiplier:2,number:25};
-  if(dist<=31.8)return{zone:"Bull",value:25,label:"Bull",multiplier:1,number:25};
-  if(dist>=95&&dist<=99)return{zone:`T${n}`,value:n*3,label:`T${n}`,multiplier:3,number:n};
-  if(dist>=53&&dist<=57)return{zone:`D${n}`,value:n*2,label:`D${n}`,multiplier:2,number:n};
-  if(dist>170)return{zone:"Miss",value:0,label:"Miss",multiplier:0,number:0};
-  return{zone:`S${n}`,value:n,label:`S${n}`,multiplier:1,number:n};
-}
-
-/* ============ DARTBOARD ============ */
-function Board({darts,onClick}){
-  const ref=useRef(null);const cx=200,cy=200,R=170;
-  const click=(e)=>{const r=ref.current.getBoundingClientRect();const x=((e.clientX-r.left)/r.width)*400;const y=((e.clientY-r.top)/r.height)*400;const dist=Math.sqrt((x-cx)**2+(y-cy)**2);if(dist<=R+5)onClick({...getZone(x,y,cx,cy),x,y});};
-  return(
-    <svg ref={ref} viewBox="0 0 400 400" className="w-full max-w-xs cursor-crosshair" onClick={click} style={{filter:"drop-shadow(0 0 30px rgba(0,0,0,0.5))"}}>
-      <circle cx={cx} cy={cy} r={R} fill="#1a1a1a" stroke="#333" strokeWidth="2"/>
-      {BN.map((num,i)=>{const sa=(i*18-99)*(Math.PI/180),ea=((i+1)*18-99)*(Math.PI/180);const ev=i%2===0;
-        return[{i:99,o:R,f:ev?"#1a1a1a":"#f0e6d3"},{i:95,o:99,f:ev?"#e8373e":"#1b8a42"},{i:57,o:95,f:ev?"#1a1a1a":"#f0e6d3"},{i:53,o:57,f:ev?"#e8373e":"#1b8a42"}].map((r,ri)=>{
-          const x1=cx+r.i*Math.cos(sa),y1=cy+r.i*Math.sin(sa),x2=cx+r.o*Math.cos(sa),y2=cy+r.o*Math.sin(sa),x3=cx+r.o*Math.cos(ea),y3=cy+r.o*Math.sin(ea),x4=cx+r.i*Math.cos(ea),y4=cy+r.i*Math.sin(ea);
-          return<path key={`${i}-${ri}`} d={`M${x1} ${y1}L${x2} ${y2}A${r.o} ${r.o} 0 0 1 ${x3} ${y3}L${x4} ${y4}A${r.i} ${r.i} 0 0 0 ${x1} ${y1}Z`} fill={r.f} stroke="#333" strokeWidth="0.5"/>;
-        });})}
-      <circle cx={cx} cy={cy} r={31.8} fill="#1b8a42" stroke="#333" strokeWidth="0.5"/>
-      <circle cx={cx} cy={cy} r={12.7} fill="#e8373e" stroke="#333" strokeWidth="0.5"/>
-      {BN.map((n,i)=>{const a=(i*18-90)*(Math.PI/180);return<text key={n} x={cx+(R+18)*Math.cos(a)} y={cy+(R+18)*Math.sin(a)} textAnchor="middle" dominantBaseline="central" fill="rgba(255,255,255,0.7)" fontSize="13" fontWeight="600" fontFamily="'Rajdhani',sans-serif">{n}</text>;})}
-      {darts.map((d,i)=>(<g key={i}><circle cx={d.x+2} cy={d.y+2} r="5" fill="rgba(0,0,0,0.3)"/><circle cx={d.x} cy={d.y} r="4" fill="#10B981" stroke="#fff" strokeWidth="1.5"/></g>))}
-    </svg>
-  );
-}
-
-/* ============ SCORE EDITOR (same tabs as Match) ============ */
+/* ============ SCORE EDITOR (för korrigeringar) ============ */
 function ScoreEditor({onSelect,onUndo,onClose}){
   const [tab,setTab]=useState("S");
   const mk=(z,v,l,m,n)=>({zone:z,value:v,label:l,multiplier:m,number:n});
@@ -120,13 +64,12 @@ function ScoreEditor({onSelect,onUndo,onClose}){
   );
 }
 
-/* ============ MAIN 121 GAME ============ */
+/* ============ MAIN 121 GAME — AUTO-SCORING ONLY ============ */
 export default function Game121({navigate}){
   const [level,setLevel]=useState(121);
   const [score,setScore]=useState(121);
   const [maxDarts,setMaxDarts]=useState(9);
   const [dartsUsed,setDartsUsed]=useState(0);
-  const [dartPos,setDartPos]=useState([]);
   const [history,setHistory]=useState([]);
   const [undoStack,setUndoStack]=useState([]);
   const [msg,setMsg]=useState(null);
@@ -154,12 +97,11 @@ export default function Game121({navigate}){
     /* Checkout! */
     if(newScore===0&&di.multiplier===2){
       setDartsUsed(d=>d+1);
-      if(di.x)setDartPos(p=>[...p,{x:di.x,y:di.y}]);
       const newLevel=level+1;
       flash(`Checkade ut ${level}! Nivå ${newLevel} — kör!`,"good");
       setHistory(p=>[{level,success:true,ts:new Date().toLocaleTimeString("sv-SE",{hour:"2-digit",minute:"2-digit"})},...p].slice(0,15));
       if(newLevel>highestLevel)setHighestLevel(newLevel);
-      setLevel(newLevel);setScore(newLevel);setDartsUsed(0);setDartPos([]);setUndoStack([]);
+      setLevel(newLevel);setScore(newLevel);setDartsUsed(0);setUndoStack([]);
       return;
     }
 
@@ -167,13 +109,11 @@ export default function Game121({navigate}){
     if(newScore<0||newScore===1||(newScore===0&&di.multiplier!==2)){
       flash(newScore<0?"Bust! Under noll":newScore===1?"Bust! Kvar: 1":"Bust! Måste sluta på dubbel","bad");
       setDartsUsed(d=>d+1);
-      if(di.x)setDartPos(p=>[...p,{x:di.x,y:di.y}]);
-      /* Kolla om alla pilar slut */
       if(dartsUsed+1>=maxDarts){
         const newLevel=Math.max(2,level-1);
         flash(`Alla pilar slut — ner till nivå ${newLevel}`,"bad");
         setHistory(p=>[{level,success:false,ts:new Date().toLocaleTimeString("sv-SE",{hour:"2-digit",minute:"2-digit"})},...p].slice(0,15));
-        setLevel(newLevel);setScore(newLevel);setDartsUsed(0);setDartPos([]);setUndoStack([]);
+        setLevel(newLevel);setScore(newLevel);setDartsUsed(0);setUndoStack([]);
       }
       return;
     }
@@ -181,33 +121,45 @@ export default function Game121({navigate}){
     /* Normal kast */
     setScore(newScore);
     setDartsUsed(d=>d+1);
-    if(di.x)setDartPos(p=>[...p,{x:di.x,y:di.y}]);
 
-    /* Alla pilar slut utan checkout */
     if(dartsUsed+1>=maxDarts){
       const newLevel=Math.max(2,level-1);
       flash(`Alla ${maxDarts} pilar utan checkout — ner till ${newLevel}`,"bad");
       setHistory(p=>[{level,success:false,ts:new Date().toLocaleTimeString("sv-SE",{hour:"2-digit",minute:"2-digit"})},...p].slice(0,15));
-      setTimeout(()=>{setLevel(newLevel);setScore(newLevel);setDartsUsed(0);setDartPos([]);setUndoStack([]);},300);
+      setTimeout(()=>{setLevel(newLevel);setScore(newLevel);setDartsUsed(0);setUndoStack([]);},300);
     }
   };
+
+  /* ===== LIVE AUTO-SCORING (alltid aktiverad) ===== */
+  const handleLiveThrow = (dartInfo) => {
+    if(dartsUsed>=maxDarts) return;
+    handleThrow(dartInfo);
+  };
+
+  const { connected, resetBackend } = useDartVision({
+    onThrow: handleLiveThrow,
+    enabled: true,
+  });
+
+  useEffect(() => {
+    resetBackend();
+  }, [resetBackend]);
 
   const handleUndo=()=>{
     if(!undoStack.length)return;
     const snap=undoStack[undoStack.length-1];
     setUndoStack(p=>p.slice(0,-1));
     setLevel(snap.level);setScore(snap.score);setDartsUsed(snap.dartsUsed);
-    setDartPos(p=>p.slice(0,-1));
     flash(`↩ Ångrade: ${snap.label}`,"info");
   };
 
-  const resetRound=()=>{setScore(level);setDartsUsed(0);setDartPos([]);setUndoStack([]);flash("Omgång återställd","info");};
+  const resetRound=()=>{setScore(level);setDartsUsed(0);setUndoStack([]);flash("Omgång återställd","info");};
 
   const applySettings=()=>{
     const d=parseInt(settingDarts);const l=parseInt(settingLevel);
     if(!isNaN(d)&&d>=1&&d<=30)setMaxDarts(d);
     if(!isNaN(l)&&l>=2&&l<=170){setLevel(l);setScore(l);}
-    setDartsUsed(0);setDartPos([]);setUndoStack([]);setShowSettings(false);
+    setDartsUsed(0);setUndoStack([]);setShowSettings(false);
     flash("Inställningar sparade!","good");
   };
 
@@ -225,13 +177,19 @@ export default function Game121({navigate}){
         <div className="flex-1 text-center">
           <span className="text-2xl font-extrabold" style={{color:"#10B981"}}>1<span style={{color:"rgba(255,255,255,0.9)"}}>2</span>1</span>
         </div>
-        <div className="w-20 flex justify-end">
-        <button onClick={()=>setShowSettings(!showSettings)} className="px-3 py-1.5 rounded-lg text-xs font-semibold uppercase tracking-widest transition-all duration-200"
-          style={{color:"rgba(255,255,255,0.3)",border:"1px solid rgba(255,255,255,0.06)"}}
-          onMouseEnter={(e)=>{e.currentTarget.style.color="rgba(255,255,255,0.7)";e.currentTarget.style.borderColor="rgba(255,255,255,0.15)";}}
-          onMouseLeave={(e)=>{e.currentTarget.style.color="rgba(255,255,255,0.3)";e.currentTarget.style.borderColor="rgba(255,255,255,0.06)";}}>
-          ⚙
-        </button>
+        <div className="w-20 flex justify-end gap-2">
+          {/* Connection status */}
+          <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg"
+            style={{background:connected?"rgba(16,185,129,0.1)":"rgba(239,68,68,0.1)",border:connected?"1px solid rgba(16,185,129,0.25)":"1px solid rgba(239,68,68,0.25)"}}>
+            <div className="w-1.5 h-1.5 rounded-full" style={{background:connected?"#10B981":"#EF4444",animation:connected?"none":"pulse 1.5s ease-in-out infinite"}}/>
+            <span className="text-[9px] font-bold uppercase tracking-widest" style={{color:connected?"#10B981":"#EF4444"}}>{connected?"Live":"..."}</span>
+          </div>
+          <button onClick={()=>setShowSettings(!showSettings)} className="px-3 py-1.5 rounded-lg text-xs font-semibold uppercase tracking-widest transition-all duration-200"
+            style={{color:"rgba(255,255,255,0.3)",border:"1px solid rgba(255,255,255,0.06)"}}
+            onMouseEnter={(e)=>{e.currentTarget.style.color="rgba(255,255,255,0.7)";e.currentTarget.style.borderColor="rgba(255,255,255,0.15)";}}
+            onMouseLeave={(e)=>{e.currentTarget.style.color="rgba(255,255,255,0.3)";e.currentTarget.style.borderColor="rgba(255,255,255,0.06)";}}>
+            ⚙
+          </button>
         </div>
       </header>
 
@@ -254,7 +212,6 @@ export default function Game121({navigate}){
           </div>
         </div>
 
-        {/* Högsta nivå */}
         <div className="mb-3 text-xs" style={{color:"rgba(255,255,255,0.2)"}}>
           Högsta nivå: <span className="font-bold" style={{color:"#10B981"}}>{highestLevel}</span>
         </div>
@@ -286,15 +243,22 @@ export default function Game121({navigate}){
           </div>
         )}
 
-        {/* ===== DARTBOARD ===== */}
-        <Board darts={dartPos} onClick={handleThrow}/>
-
         {/* Dart indicators */}
-        <div className="flex gap-1.5 mt-3">
+        <div className="flex gap-1.5 mt-3 mb-4">
           {Array.from({length:maxDarts}).map((_,i)=>(
             <div key={i} className="w-3 h-3 rounded-full transition-all duration-200" style={{background:i<dartsUsed?"#10B981":"rgba(255,255,255,0.08)"}}/>
           ))}
         </div>
+
+        {/* Väntar-indikator */}
+        {dartsLeft>0&&(
+          <div className="mb-4 p-6 rounded-2xl w-full max-w-md text-center" style={{background:"rgba(16,185,129,0.05)",border:"1px solid rgba(16,185,129,0.15)"}}>
+            <div className="w-3 h-3 rounded-full mx-auto mb-3" style={{background:connected?"#10B981":"#EF4444",animation:"pulse 1.5s ease-in-out infinite"}}/>
+            <span className="text-sm" style={{color:"rgba(255,255,255,0.4)"}}>
+              {connected?"Väntar på kast...":"Ansluter till kamera..."}
+            </span>
+          </div>
+        )}
 
         {/* ===== ACTIONS ===== */}
         <div className="flex items-center gap-2 mt-4 flex-wrap justify-center">
@@ -304,6 +268,13 @@ export default function Game121({navigate}){
             onMouseEnter={(e)=>{if(undoStack.length){e.currentTarget.style.color="#10B981";}}}
             onMouseLeave={(e)=>{if(undoStack.length){e.currentTarget.style.color="rgba(255,255,255,0.4)";}}}>
             ↩ Ångra
+          </button>
+          <button onClick={()=>handleThrow({zone:"Miss",value:0,label:"Miss",multiplier:0,number:0})}
+            className="px-4 py-2 rounded-xl text-xs font-semibold uppercase tracking-widest transition-all duration-200"
+            style={{background:"rgba(239,68,68,0.08)",color:"#EF4444",border:"1px solid rgba(239,68,68,0.2)"}}
+            onMouseEnter={(e)=>e.currentTarget.style.background="rgba(239,68,68,0.15)"}
+            onMouseLeave={(e)=>e.currentTarget.style.background="rgba(239,68,68,0.08)"}>
+            Miss
           </button>
           <button onClick={resetRound} className="px-4 py-2 rounded-xl text-xs font-semibold uppercase tracking-widest transition-all duration-200"
             style={{background:"rgba(255,255,255,0.04)",color:"rgba(255,255,255,0.4)",border:"1px solid rgba(255,255,255,0.08)"}}
@@ -315,7 +286,7 @@ export default function Game121({navigate}){
             style={{background:"rgba(16,185,129,0.1)",color:"#10B981",border:"1px solid rgba(16,185,129,0.25)"}}
             onMouseEnter={(e)=>e.currentTarget.style.background="rgba(16,185,129,0.2)"}
             onMouseLeave={(e)=>e.currentTarget.style.background="rgba(16,185,129,0.1)"}>
-            Poängtavla
+            Korrigera
           </button>
         </div>
 
@@ -367,7 +338,6 @@ export default function Game121({navigate}){
         )}
       </main>
 
-      {/* Score Editor Modal */}
       {showEditor&&(
         <ScoreEditor
           onSelect={(di)=>{setShowEditor(false);handleThrow(di);}}
@@ -376,6 +346,7 @@ export default function Game121({navigate}){
         />
       )}
 
+      <style>{`@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }`}</style>
       <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet"/>
     </div>
   );

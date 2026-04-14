@@ -159,77 +159,7 @@ function GameCard({ mode, onSelect }) {
   );
 }
 
-/* ============ LIVE SCORING CARD ============ */
-function LiveScoringCard({ onClick }) {
-  const [hov, setHov] = useState(false);
 
-  return (
-    <button
-      onClick={onClick}
-      onMouseEnter={() => setHov(true)}
-      onMouseLeave={() => setHov(false)}
-      className="relative flex items-center gap-6 rounded-2xl border p-6 w-full transition-all duration-300 text-left"
-      style={{
-        background: hov
-          ? "linear-gradient(145deg, rgba(16,185,129,0.1) 0%, rgba(15,15,20,0.95) 60%)"
-          : "rgba(20, 20, 28, 0.8)",
-        borderColor: hov ? "rgba(16,185,129,0.4)" : "rgba(255,255,255,0.06)",
-        boxShadow: hov
-          ? "0 0 50px rgba(16,185,129,0.15), 0 8px 32px rgba(0,0,0,0.4)"
-          : "0 2px 12px rgba(0,0,0,0.3)",
-        transform: hov ? "translateY(-4px)" : "translateY(0)",
-      }}
-    >
-      <div
-        className="absolute top-0 left-6 right-6 h-px transition-opacity duration-300"
-        style={{
-          background: "linear-gradient(90deg, transparent, rgba(16,185,129,0.6), transparent)",
-          opacity: hov ? 1 : 0,
-        }}
-      />
-      <div
-        className="w-14 h-14 rounded-xl flex items-center justify-center flex-shrink-0 transition-all duration-300"
-        style={{
-          background: hov ? "rgba(16,185,129,0.15)" : "rgba(16,185,129,0.08)",
-          border: "1px solid rgba(16,185,129,0.2)",
-        }}
-      >
-        <svg width="28" height="28" viewBox="0 0 32 32" fill="none" strokeWidth="1.5" strokeLinecap="round">
-          <rect x="3" y="6" width="26" height="18" rx="3" stroke={hov ? "#10B981" : "rgba(255,255,255,0.3)"} />
-          <circle cx="16" cy="15" r="5" stroke={hov ? "#10B981" : "rgba(255,255,255,0.3)"} />
-          <circle cx="16" cy="15" r="2" fill={hov ? "#10B981" : "rgba(255,255,255,0.2)"} />
-          <circle cx="7" cy="10" r="1.5" fill="#EF4444" />
-        </svg>
-      </div>
-      <div className="flex-1">
-        <div className="flex items-center gap-3 mb-1">
-          <h3
-            className="text-xl font-bold tracking-tight transition-colors duration-300"
-            style={{ color: hov ? "#10B981" : "rgba(255,255,255,0.9)" }}
-          >
-            Live Scoring
-          </h3>
-          <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" style={{ boxShadow: "0 0 8px rgba(16,185,129,0.5)" }} />
-        </div>
-        <p className="text-sm leading-relaxed" style={{ color: "rgba(255,255,255,0.4)" }}>
-          Kameror + YOLO auto-scoring i realtid. Se detektioner, scoring och board-overlay live.
-        </p>
-        <div
-          className="flex items-center gap-2 mt-3 text-xs font-semibold uppercase tracking-widest transition-all duration-300"
-          style={{
-            color: hov ? "#10B981" : "rgba(255,255,255,0.2)",
-            transform: hov ? "translateX(4px)" : "translateX(0)",
-          }}
-        >
-          <span>Öppna</span>
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M2 7h10M8 3l4 4-4 4" />
-          </svg>
-        </div>
-      </div>
-    </button>
-  );
-}
 
 /* ============ HEADER BUTTON ============ */
 function HeaderButton({ onClick, children }) {
@@ -350,21 +280,6 @@ export default function DartLobby({ navigate, user }) {
         </div>
 
         <div className="w-full max-w-4xl">
-
-          {/* ===== LIVE SCORING ===== */}
-          <div className="mb-6">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="h-px flex-1" style={{ background: "linear-gradient(90deg, transparent, rgba(16,185,129,0.15))" }} />
-              <div className="flex items-center gap-2">
-                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="text-xs font-semibold uppercase tracking-[0.25em]" style={{ color: "rgba(16,185,129,0.5)" }}>
-                  Kamera
-                </span>
-              </div>
-              <div className="h-px flex-1" style={{ background: "linear-gradient(90deg, rgba(16,185,129,0.15), transparent)" }} />
-            </div>
-            <LiveScoringCard onClick={() => navigate("live")} />
-          </div>
 
           {/* ===== SPELLÄGEN ===== */}
           <div className="flex items-center gap-3 mb-6">

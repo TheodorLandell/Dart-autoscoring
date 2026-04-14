@@ -62,7 +62,7 @@ function InputField({ label, type = "text", value, onChange, placeholder, error 
   );
 }
 
-export default function LoginPage({ navigate, user, setUser }) {
+export default function LoginPage({ navigate, user: _user, setUser }) {
   const [mode, setMode] = useState("login");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -87,30 +87,41 @@ export default function LoginPage({ navigate, user, setUser }) {
     return Object.keys(errs).length === 0;
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!validate()) return;
     setLoading(true);
+    setErrors({});
 
-    /* Simulerad login/register — byt ut mot:
-       const res = await fetch('/api/auth/' + mode, {
-         method: 'POST',
-         headers: { 'Content-Type': 'application/json' },
-         body: JSON.stringify({ username, password })
-       });
-       const { token, user } = await res.json();
-       localStorage.setItem('dart_token', token); */
-    setTimeout(() => {
-      const userData = {
-        username: username,
-        created_at: new Date().toLocaleDateString("sv-SE"),
-        stats: mode === "register"
-          ? { matches_played: 0, win_pct: 0, highest_checkout: 0, favorite_mode: null, avg_score: 0, best_leg: null }
-          : { matches_played: 47, win_pct: 62, highest_checkout: 170, favorite_mode: "Match 501", avg_score: 58.4, best_leg: 18 },
-      };
-      setUser(userData);
+    try {
+      const res = await fetch(`http://localhost:8000/api/auth/${mode}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
+
+      let data;
+      try {
+        data = await res.json();
+      } catch (_e) {
+        setErrors({ general: "Servern returnerade ett ogiltigt svar" });
+        setLoading(false);
+        return;
+      }
+
+      if (!res.ok) {
+        setErrors({ general: data.error || "Något gick fel" });
+        setLoading(false);
+        return;
+      }
+
+      localStorage.setItem("dart_token", data.token);
+      setUser(data.user);
       setLoading(false);
-      navigate("profile"); // → Gå till profilsidan efter lyckad login
-    }, 800);
+      navigate("profile");
+    } catch (err) {
+      setErrors({ general: "Kan inte ansluta till servern" });
+      setLoading(false);
+    }
   };
 
   return (
@@ -196,6 +207,13 @@ export default function LoginPage({ navigate, user, setUser }) {
               <InputField label="Bekräfta lösenord" type="password" value={confirmPassword} onChange={setConfirmPassword} placeholder="••••••••" error={errors.confirm} />
             )}
           </div>
+
+          {/* General error */}
+          {errors.general && (
+            <div className="mt-4 px-4 py-3 rounded-xl text-center" style={{ background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.25)" }}>
+              <span className="text-xs font-semibold" style={{ color: "#EF4444" }}>{errors.general}</span>
+            </div>
+          )}
 
           {/* Submit */}
           <button
