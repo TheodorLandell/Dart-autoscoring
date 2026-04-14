@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import useDartVision from "./useDartVision";
 
 /*
@@ -136,6 +136,7 @@ export default function MatchGame({ navigate, matchConfig, isTournament = false,
   const [rndCount,setRndCount]=useState(()=>players.map(()=>0));
   const [editing,setEditing]=useState(null);
   const [gameOver,setGameOver]=useState(false);
+  const confirmingRef=useRef(false);
   const [winner,setWinner]=useState(null);
   const [bust,setBust]=useState(null);
   const [finalLegsWon, setFinalLegsWon] = useState(null);
@@ -182,6 +183,9 @@ export default function MatchGame({ navigate, matchConfig, isTournament = false,
   };
 
   const confirmRound=(d)=>{
+    if(confirmingRef.current)return;
+    confirmingRef.current=true;
+    setTimeout(()=>{confirmingRef.current=false;},200);
     const ds=d||cDarts;const t=ds.reduce((s,x)=>s+(x?x.value:0),0);
     setHistory(p=>[...p,{pi:cpIdx,darts:[...ds],sb:cs,bust:false}]);
     setTotThrown(p=>{const n=[...p];n[cpIdx]+=t;return n;});
@@ -233,26 +237,36 @@ export default function MatchGame({ navigate, matchConfig, isTournament = false,
   };
 
   return(
-    <div className="relative min-h-screen overflow-hidden" style={{background:"linear-gradient(145deg, #0a0a10 0%, #0f0f18 40%, #0d0d14 100%)",fontFamily:"'Rajdhani','Segoe UI',sans-serif"}}>
-      <div className="absolute inset-0 opacity-[0.03]" style={{backgroundImage:`linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)`,backgroundSize:"60px 60px"}}/>
+    <div className="relative min-h-screen overflow-hidden" style={{background:"#000",fontFamily:"'Rajdhani','Segoe UI',sans-serif"}}>
+
+      {/* ── Kamerafeed som bakgrund ── */}
+      <img
+        src="http://localhost:8000/api/stream/camera"
+        alt=""
+        aria-hidden="true"
+        className="absolute inset-0 w-full h-full"
+        style={{objectFit:"cover"}}
+      />
+      {/* Mörkningsoverlay: mörkt i topp och botten, genomskinligt i mitten */}
+      <div className="absolute inset-0 pointer-events-none" style={{background:"linear-gradient(to bottom, rgba(0,0,0,0.6) 0%, rgba(0,0,0,0.15) 40%, rgba(0,0,0,0.15) 60%, rgba(0,0,0,0.65) 100%)"}}/>
 
       {/* Header */}
-      <header className="relative z-10 flex items-center justify-between px-6 py-3">
-        <button onClick={()=>isTournament ? handleAbortTournamentMatch() : navigate("lobby")} className="flex items-center gap-2 transition-colors duration-200" style={{color:"rgba(255,255,255,0.3)"}}
-          onMouseEnter={(e)=>e.currentTarget.style.color="rgba(255,255,255,0.7)"} onMouseLeave={(e)=>e.currentTarget.style.color="rgba(255,255,255,0.3)"}>
+      <header className="relative z-10 flex items-center justify-between px-6 py-3" style={{background:"rgba(0,0,0,0.55)",backdropFilter:"blur(14px)",borderBottom:"1px solid rgba(255,255,255,0.07)"}}>
+        <button onClick={()=>isTournament ? handleAbortTournamentMatch() : navigate("lobby")} className="flex items-center gap-2 transition-colors duration-200" style={{color:"rgba(255,255,255,0.4)"}}
+          onMouseEnter={(e)=>e.currentTarget.style.color="rgba(255,255,255,0.8)"} onMouseLeave={(e)=>e.currentTarget.style.color="rgba(255,255,255,0.4)"}>
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M10 2L4 8l6 6"/></svg>
           <span className="text-xs font-semibold uppercase tracking-widest">Avbryt</span>
         </button>
         <div className="flex items-center gap-3">
           {isTournament && <span className="text-lg">🏆</span>}
-          <span className="text-sm font-bold uppercase tracking-widest" style={{color:"rgba(255,255,255,0.3)"}}>
+          <span className="text-sm font-bold uppercase tracking-widest" style={{color:"rgba(255,255,255,0.5)"}}>
             {startingScore} · {format==="best-of"?`Bäst av ${totalLegs}`:`Först till ${legsToWin}`}
           </span>
         </div>
         {/* Connection status */}
         <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg"
-          style={{background:connected?"rgba(16,185,129,0.1)":"rgba(239,68,68,0.1)",border:connected?"1px solid rgba(16,185,129,0.25)":"1px solid rgba(239,68,68,0.25)"}}>
-          <div className="w-2 h-2 rounded-full" style={{background:connected?"#10B981":"#EF4444",boxShadow:connected?"0 0 8px rgba(16,185,129,0.5)":"none",animation:connected?"none":"pulse 1.5s ease-in-out infinite"}}/>
+          style={{background:connected?"rgba(16,185,129,0.15)":"rgba(239,68,68,0.15)",border:connected?"1px solid rgba(16,185,129,0.35)":"1px solid rgba(239,68,68,0.35)"}}>
+          <div className="w-2 h-2 rounded-full" style={{background:connected?"#10B981":"#EF4444",boxShadow:connected?"0 0 8px rgba(16,185,129,0.6)":"none",animation:connected?"none":"pulse 1.5s ease-in-out infinite"}}/>
           <span className="text-[10px] font-bold uppercase tracking-widest" style={{color:connected?"#10B981":"#EF4444"}}>{connected?"Live":"Ansluter..."}</span>
         </div>
       </header>
@@ -261,14 +275,14 @@ export default function MatchGame({ navigate, matchConfig, isTournament = false,
 
         {/* ===== GAME OVER ===== */}
         {gameOver&&winner&&(
-          <div className="w-full max-w-lg mb-6 p-8 rounded-2xl text-center" style={{background:"rgba(16,185,129,0.1)",border:"1px solid rgba(16,185,129,0.3)"}}>
-            <span className="text-sm uppercase tracking-widest block mb-2" style={{color:"rgba(255,255,255,0.3)"}}>Match slut!</span>
+          <div className="w-full max-w-lg mb-6 p-8 rounded-2xl text-center" style={{background:"rgba(0,0,0,0.82)",border:"1px solid rgba(16,185,129,0.35)",backdropFilter:"blur(16px)"}}>
+            <span className="text-sm uppercase tracking-widest block mb-2" style={{color:"rgba(255,255,255,0.35)"}}>Match slut!</span>
             <span className="text-4xl font-extrabold block mb-3" style={{color:"#10B981"}}>{winner.name} vinner!</span>
             <div className="flex justify-center gap-6 mb-4">
-              {players.map((p,i)=>(<span key={p.id} className="text-sm" style={{color:"rgba(255,255,255,0.4)"}}>{p.name}: <strong style={{color:PC[i%PC.length]}}>{getAvg(i)}</strong> avg</span>))}
+              {players.map((p,i)=>(<span key={p.id} className="text-sm" style={{color:"rgba(255,255,255,0.45)"}}>{p.name}: <strong style={{color:PC[i%PC.length]}}>{getAvg(i)}</strong> avg</span>))}
             </div>
             <div className="flex justify-center gap-6 mb-6">
-              {players.map((p,i)=>(<span key={p.id} className="text-sm" style={{color:"rgba(255,255,255,0.3)"}}>{p.name}: <strong style={{color:PC[i%PC.length]}}>{legsWon[i]}</strong> legs</span>))}
+              {players.map((p,i)=>(<span key={p.id} className="text-sm" style={{color:"rgba(255,255,255,0.35)"}}>{p.name}: <strong style={{color:PC[i%PC.length]}}>{legsWon[i]}</strong> legs</span>))}
             </div>
 
             {isTournament ? (
@@ -285,75 +299,80 @@ export default function MatchGame({ navigate, matchConfig, isTournament = false,
 
         {/* ===== CURRENT PLAYER ===== */}
         {!gameOver&&(
-          <div className="mb-3 px-8 py-3 rounded-xl flex items-center gap-4" style={{background:PC[cpIdx%PC.length]+"0C",border:`1px solid ${PC[cpIdx%PC.length]}30`}}>
+          <div className="mt-4 mb-3 px-8 py-3 rounded-xl flex items-center gap-4" style={{background:"rgba(0,0,0,0.72)",border:`1px solid ${PC[cpIdx%PC.length]}45`,backdropFilter:"blur(12px)"}}>
             <div className="w-4 h-4 rounded-full" style={{background:PC[cpIdx%PC.length]}}/>
             <span className="text-2xl font-extrabold" style={{color:PC[cpIdx%PC.length]}}>{cp.name}</span>
-            <span className="text-xl font-bold ml-2" style={{color:"rgba(255,255,255,0.5)"}}>{cs}</span>
-            <span className="text-sm ml-2 px-2 py-0.5 rounded-md" style={{background:"rgba(255,255,255,0.05)",color:"rgba(255,255,255,0.35)"}}>
+            <span className="text-xl font-bold ml-2" style={{color:"rgba(255,255,255,0.75)"}}>{proj}</span>
+            <span className="text-sm ml-2 px-2 py-0.5 rounded-md" style={{background:"rgba(255,255,255,0.08)",color:"rgba(255,255,255,0.45)"}}>
               AVG {getAvg(cpIdx)}
             </span>
           </div>
         )}
 
-        {bust&&(<div className="mb-3 px-6 py-2.5 rounded-xl" style={{background:"rgba(239,68,68,0.15)",border:"1px solid rgba(239,68,68,0.3)"}}><span className="text-base font-bold" style={{color:"#EF4444"}}>{bust}</span></div>)}
+        {bust&&(<div className="mb-3 px-6 py-2.5 rounded-xl" style={{background:"rgba(239,68,68,0.22)",border:"1px solid rgba(239,68,68,0.5)",backdropFilter:"blur(8px)"}}><span className="text-base font-bold" style={{color:"#EF4444"}}>{bust}</span></div>)}
 
-        {/* ===== DART SLOTS (klicka för att korrigera) ===== */}
+        {/* ===== DART SLOTS + KNAPPAR + CHECKOUT (ett glasspanel) ===== */}
         {!gameOver&&(
-          <div className="flex items-center gap-3 mt-3">
-            {cDarts.map((d,i)=>(<DartSlot key={i} index={i} dart={d} isCurrent={i===thrown} onEdit={setEditing}/>))}
-          </div>
-        )}
+          <div className="flex flex-col items-center gap-4 px-6 py-5 rounded-2xl" style={{background:"rgba(0,0,0,0.72)",border:"1px solid rgba(255,255,255,0.09)",backdropFilter:"blur(14px)"}}>
 
-        {!gameOver&&thrown>0&&(
-          <div className="flex items-center gap-6 mt-3">
-            <span className="text-base" style={{color:"rgba(255,255,255,0.35)"}}>Runda: <strong className="text-lg" style={{color:"rgba(255,255,255,0.8)"}}>{rndTotal}</strong></span>
-            <span className="text-base" style={{color:"rgba(255,255,255,0.35)"}}>Kvar: <strong className="text-lg" style={{color:proj<=0?"#EF4444":"rgba(255,255,255,0.8)"}}>{proj}</strong></span>
-          </div>
-        )}
-
-        {!gameOver&&(
-          <div className="flex items-center gap-3 mt-4">
-            <button onClick={handleUndo} disabled={!canUndo}
-              className="px-5 py-2.5 rounded-xl text-sm font-semibold uppercase tracking-widest transition-all duration-200"
-              style={{background:canUndo?"rgba(255,255,255,0.04)":"rgba(255,255,255,0.01)",color:canUndo?"rgba(255,255,255,0.4)":"rgba(255,255,255,0.1)",border:canUndo?"1px solid rgba(255,255,255,0.08)":"1px solid rgba(255,255,255,0.03)",cursor:canUndo?"pointer":"default"}}
-              onMouseEnter={(e)=>{if(canUndo){e.currentTarget.style.color="#EF4444";e.currentTarget.style.borderColor="rgba(239,68,68,0.3)";}}}
-              onMouseLeave={(e)=>{if(canUndo){e.currentTarget.style.color="rgba(255,255,255,0.4)";e.currentTarget.style.borderColor="rgba(255,255,255,0.08)";}}}>
-              ↩ Ångra
-            </button>
-            {thrown<3&&(
-              <button onClick={()=>applyDart({zone:"Miss",value:0,label:"Miss",multiplier:0,number:0})}
-                className="px-5 py-2.5 rounded-xl text-sm font-semibold uppercase tracking-widest transition-all duration-200"
-                style={{background:"rgba(239,68,68,0.08)",color:"#EF4444",border:"1px solid rgba(239,68,68,0.2)"}}
-                onMouseEnter={(e)=>e.currentTarget.style.background="rgba(239,68,68,0.15)"}
-                onMouseLeave={(e)=>e.currentTarget.style.background="rgba(239,68,68,0.08)"}>
-                Miss
-              </button>
-            )}
-            {thrown>0&&thrown<3&&(
-              <button onClick={()=>confirmRound(null)} className="px-6 py-2.5 rounded-xl text-sm font-semibold uppercase tracking-widest transition-all duration-200"
-                style={{background:"rgba(16,185,129,0.1)",color:"#10B981",border:"1px solid rgba(16,185,129,0.25)"}}
-                onMouseEnter={(e)=>e.currentTarget.style.background="rgba(16,185,129,0.2)"} onMouseLeave={(e)=>e.currentTarget.style.background="rgba(16,185,129,0.1)"}>
-                Bekräfta runda
-              </button>
-            )}
-          </div>
-        )}
-
-        {!gameOver&&checkout&&left>0&&(
-          <div className="mt-4 px-6 py-3 rounded-xl w-full max-w-sm" style={{background:"rgba(139,92,246,0.08)",border:"1px solid rgba(139,92,246,0.25)"}}>
-            <span className="text-xs uppercase tracking-widest block mb-2" style={{color:"rgba(255,255,255,0.3)"}}>Checkout ({proj})</span>
-            <div className="flex items-center gap-2">
-              {checkout.map((c,i)=>(<span key={i} className="px-4 py-2 rounded-lg text-base font-bold" style={{background:"rgba(139,92,246,0.15)",color:"#A78BFA"}}>{c}</span>))}
+            {/* Dart slots — klicka för att korrigera */}
+            <div className="flex items-center gap-3">
+              {cDarts.map((d,i)=>(<DartSlot key={i} index={i} dart={d} isCurrent={i===thrown} onEdit={setEditing}/>))}
             </div>
+
+            {/* Runda-summering */}
+            {thrown>0&&(
+              <div className="flex items-center gap-6">
+                <span className="text-base" style={{color:"rgba(255,255,255,0.45)"}}>Runda: <strong className="text-lg" style={{color:"rgba(255,255,255,0.9)"}}>{rndTotal}</strong></span>
+                <span className="text-base" style={{color:"rgba(255,255,255,0.45)"}}>Kvar: <strong className="text-lg" style={{color:proj<=0?"#EF4444":"rgba(255,255,255,0.9)"}}>{proj}</strong></span>
+              </div>
+            )}
+
+            {/* Åtgärdsknappar */}
+            <div className="flex items-center gap-3">
+              <button onClick={handleUndo} disabled={!canUndo}
+                className="px-5 py-2.5 rounded-xl text-sm font-semibold uppercase tracking-widest transition-all duration-200"
+                style={{background:canUndo?"rgba(255,255,255,0.07)":"rgba(255,255,255,0.02)",color:canUndo?"rgba(255,255,255,0.5)":"rgba(255,255,255,0.15)",border:canUndo?"1px solid rgba(255,255,255,0.12)":"1px solid rgba(255,255,255,0.04)",cursor:canUndo?"pointer":"default"}}
+                onMouseEnter={(e)=>{if(canUndo){e.currentTarget.style.color="#EF4444";e.currentTarget.style.borderColor="rgba(239,68,68,0.4)";}}}
+                onMouseLeave={(e)=>{if(canUndo){e.currentTarget.style.color="rgba(255,255,255,0.5)";e.currentTarget.style.borderColor="rgba(255,255,255,0.12)";}}}>
+                ↩ Ångra
+              </button>
+              {thrown<3&&(
+                <button onClick={()=>applyDart({zone:"Miss",value:0,label:"Miss",multiplier:0,number:0})}
+                  className="px-5 py-2.5 rounded-xl text-sm font-semibold uppercase tracking-widest transition-all duration-200"
+                  style={{background:"rgba(239,68,68,0.12)",color:"#EF4444",border:"1px solid rgba(239,68,68,0.3)"}}
+                  onMouseEnter={(e)=>e.currentTarget.style.background="rgba(239,68,68,0.22)"}
+                  onMouseLeave={(e)=>e.currentTarget.style.background="rgba(239,68,68,0.12)"}>
+                  Miss
+                </button>
+              )}
+              {thrown>0&&(
+                <button onClick={()=>confirmRound(null)} className="px-6 py-2.5 rounded-xl text-sm font-semibold uppercase tracking-widest transition-all duration-200"
+                  style={{background:"rgba(16,185,129,0.15)",color:"#10B981",border:"1px solid rgba(16,185,129,0.35)"}}
+                  onMouseEnter={(e)=>e.currentTarget.style.background="rgba(16,185,129,0.25)"} onMouseLeave={(e)=>e.currentTarget.style.background="rgba(16,185,129,0.15)"}>
+                  Bekräfta runda
+                </button>
+              )}
+            </div>
+
+            {/* Checkout-förslag */}
+            {checkout&&left>0&&(
+              <div className="px-6 py-3 rounded-xl w-full" style={{background:"rgba(139,92,246,0.15)",border:"1px solid rgba(139,92,246,0.35)"}}>
+                <span className="text-xs uppercase tracking-widest block mb-2" style={{color:"rgba(255,255,255,0.4)"}}>Checkout ({proj})</span>
+                <div className="flex items-center gap-2">
+                  {checkout.map((c,i)=>(<span key={i} className="px-4 py-2 rounded-lg text-base font-bold" style={{background:"rgba(139,92,246,0.2)",color:"#A78BFA"}}>{c}</span>))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
         {/* ===== SCOREBOARD ===== */}
-        <div className="w-full max-w-lg mt-8">
+        <div className="w-full max-w-lg mt-6">
           <div className="flex items-center gap-3 mb-4">
-            <div className="h-px flex-1" style={{background:"linear-gradient(90deg, transparent, rgba(255,255,255,0.08))"}}/>
-            <span className="text-xs font-semibold uppercase tracking-[0.25em]" style={{color:"rgba(255,255,255,0.25)"}}>Scoreboard</span>
-            <div className="h-px flex-1" style={{background:"linear-gradient(90deg, rgba(255,255,255,0.08), transparent)"}}/>
+            <div className="h-px flex-1" style={{background:"linear-gradient(90deg, transparent, rgba(255,255,255,0.12))"}}/>
+            <span className="text-xs font-semibold uppercase tracking-[0.25em]" style={{color:"rgba(255,255,255,0.4)"}}>Scoreboard</span>
+            <div className="h-px flex-1" style={{background:"linear-gradient(90deg, rgba(255,255,255,0.12), transparent)"}}/>
           </div>
 
           <div className="flex flex-col gap-3">
@@ -361,23 +380,25 @@ export default function MatchGame({ navigate, matchConfig, isTournament = false,
               const act=i===cpIdx&&!gameOver;const c=PC[i%PC.length];
               return(
                 <div key={p.id} className="flex items-center justify-between px-5 py-4 rounded-xl transition-all duration-200" style={{
-                  background:act?c+"0C":"rgba(255,255,255,0.02)",border:act?`2px solid ${c}30`:"1px solid rgba(255,255,255,0.05)",
+                  background:act?"rgba(0,0,0,0.82)":"rgba(0,0,0,0.62)",
+                  border:act?`2px solid ${c}50`:"1px solid rgba(255,255,255,0.09)",
+                  backdropFilter:"blur(12px)",
                 }}>
                   <div className="flex items-center gap-4">
-                    <div className="w-4 h-4 rounded-full" style={{background:c,opacity:act?1:0.4}}/>
+                    <div className="w-4 h-4 rounded-full" style={{background:c,opacity:act?1:0.5}}/>
                     <div>
-                      <span className="text-lg font-bold" style={{color:act?"rgba(255,255,255,0.95)":"rgba(255,255,255,0.6)"}}>{p.name}</span>
+                      <span className="text-lg font-bold" style={{color:act?"rgba(255,255,255,0.95)":"rgba(255,255,255,0.65)"}}>{p.name}</span>
                       <div className="flex items-center gap-2 mt-0.5">
-                        <span className="text-sm font-semibold" style={{color:"rgba(255,255,255,0.3)"}}>AVG: <span style={{color:c+"CC"}}>{getAvg(i)}</span></span>
-                        {act&&<span className="text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded" style={{background:c+"20",color:c}}>Kastar</span>}
+                        <span className="text-sm font-semibold" style={{color:"rgba(255,255,255,0.35)"}}>AVG: <span style={{color:c+"CC"}}>{getAvg(i)}</span></span>
+                        {act&&<span className="text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded" style={{background:c+"25",color:c}}>Kastar</span>}
                       </div>
                     </div>
                   </div>
                   <div className="flex items-center gap-5">
-                    <span className="text-4xl font-extrabold" style={{color:act?c:"rgba(255,255,255,0.6)"}}>{scores[i]}</span>
+                    <span className="text-4xl font-extrabold" style={{color:act?c:"rgba(255,255,255,0.65)"}}>{act?proj:scores[i]}</span>
                     <div className="flex gap-1.5">
                       {Array.from({length:legsToWin}).map((_,li)=>(
-                        <div key={li} className="w-3 h-3 rounded-full" style={{background:li<legsWon[i]?c:"rgba(255,255,255,0.08)"}}/>
+                        <div key={li} className="w-3 h-3 rounded-full" style={{background:li<legsWon[i]?c:"rgba(255,255,255,0.12)"}}/>
                       ))}
                     </div>
                   </div>

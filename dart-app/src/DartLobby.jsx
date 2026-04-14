@@ -247,16 +247,24 @@ export default function DartLobby({ navigate, user }) {
           )}
         </HeaderButton>
 
-        <HeaderButton onClick={() => navigate("calibrate")}>
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="rgba(255,255,255,0.4)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="2" y="2" width="12" height="12" rx="2" />
-            <circle cx="8" cy="8" r="2.5" />
-            <path d="M8 2v2M8 12v2M2 8h2M12 8h2" />
-          </svg>
-          <span className="text-sm font-semibold" style={{ color: "rgba(255,255,255,0.6)" }}>
-            Kalibrering
-          </span>
-        </HeaderButton>
+        <div className="flex items-center gap-2">
+          <HeaderButton onClick={() => navigate("live-scoring")}>
+            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" style={{boxShadow:"0 0 6px rgba(16,185,129,0.7)"}}/>
+            <span className="text-sm font-semibold" style={{ color: "rgba(255,255,255,0.6)" }}>
+              Live
+            </span>
+          </HeaderButton>
+          <HeaderButton onClick={() => navigate("calibrate")}>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="rgba(255,255,255,0.4)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="2" y="2" width="12" height="12" rx="2" />
+              <circle cx="8" cy="8" r="2.5" />
+              <path d="M8 2v2M8 12v2M2 8h2M12 8h2" />
+            </svg>
+            <span className="text-sm font-semibold" style={{ color: "rgba(255,255,255,0.6)" }}>
+              Kalibrering
+            </span>
+          </HeaderButton>
+        </div>
       </header>
 
       <main className="relative z-10 flex flex-col items-center px-6 pt-8 pb-16">

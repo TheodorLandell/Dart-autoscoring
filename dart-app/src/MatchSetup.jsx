@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState } from "react";
 import ThrowForBull from "./ThrowForBull";
 
 /*
@@ -470,7 +470,7 @@ export default function MatchSetup({ navigate, user }) {
           {/* Format */}
           <div className="flex gap-2">
             <OptionButton
-              label={`Först till ${Math.ceil(legs / 2)}`}
+              label={`Först till ${legs}`}
               selected={legMode === "first-to" || legMode === "custom-legs"}
               onClick={() => setLegMode(legMode === "custom-legs" ? "custom-legs" : "first-to")}
               accent="#10B981"
@@ -511,7 +511,7 @@ export default function MatchSetup({ navigate, user }) {
           {canStart && (
             <div className="text-xs text-center mt-2" style={{ color: "rgba(255,255,255,0.2)" }}>
               {players.length} spelare · {scoreMode === "custom" ? customScore || "?" : startingScore} poäng ·{" "}
-              {legMode === "best-of" ? `Bäst av ${legs}` : `Först till ${Math.ceil(legs / 2)}`} legs
+              {legMode === "best-of" ? `Bäst av ${legs}` : `Först till ${legs}`} legs
             </div>
           )}
         </div>

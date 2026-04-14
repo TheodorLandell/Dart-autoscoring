@@ -453,7 +453,7 @@ export default function TournamentBracket({ navigate, tournamentConfig }) {
           <span className="text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>
             {matchSettings.format === "best-of"
               ? `Bäst av ${matchSettings.legs}`
-              : `Först till ${Math.ceil(matchSettings.legs / 2)}`
+              : `Först till ${matchSettings.legs}`
             } legs
           </span>
           <div className="w-1 h-1 rounded-full" style={{ background: "rgba(255,255,255,0.1)" }} />

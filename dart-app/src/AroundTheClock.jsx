@@ -198,10 +198,11 @@ function ATCGame({config,navigate}){
   const variantLabel=variant==="any"?"Valfri yta":variant==="single"?"Single":variant==="double"?"Dubbel":"Trippel";
 
   return(
-    <div className="relative min-h-screen overflow-hidden" style={{background:"linear-gradient(145deg, #0a0a10 0%, #0f0f18 40%, #0d0d14 100%)",fontFamily:"'Rajdhani','Segoe UI',sans-serif"}}>
-      <div className="absolute inset-0 opacity-[0.03]" style={{backgroundImage:`linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)`,backgroundSize:"60px 60px"}}/>
+    <div className="relative min-h-screen overflow-hidden" style={{background:"#000",fontFamily:"'Rajdhani','Segoe UI',sans-serif"}}>
+      <img src="http://localhost:8000/api/stream/camera" alt="" aria-hidden="true" className="absolute inset-0 w-full h-full" style={{objectFit:"cover"}}/>
+      <div className="absolute inset-0 pointer-events-none" style={{background:"linear-gradient(to bottom, rgba(0,0,0,0.6) 0%, rgba(0,0,0,0.15) 40%, rgba(0,0,0,0.15) 60%, rgba(0,0,0,0.65) 100%)"}}/>
 
-      <header className="relative z-10 flex items-center px-6 py-3">
+      <header className="relative z-10 flex items-center px-6 py-3" style={{background:"rgba(0,0,0,0.55)",backdropFilter:"blur(14px)",borderBottom:"1px solid rgba(255,255,255,0.07)"}}>
         <button onClick={()=>navigate("lobby")} className="flex items-center gap-2 w-20 transition-colors duration-200" style={{color:"rgba(255,255,255,0.3)"}}
           onMouseEnter={(e)=>e.currentTarget.style.color="rgba(255,255,255,0.7)"} onMouseLeave={(e)=>e.currentTarget.style.color="rgba(255,255,255,0.3)"}>
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M10 2L4 8l6 6"/></svg>
@@ -222,7 +223,7 @@ function ATCGame({config,navigate}){
 
         {/* ===== TARGET ===== */}
         {!completed&&(
-          <div className="mb-4 p-5 rounded-2xl w-full max-w-md text-center" style={{background:"rgba(139,92,246,0.08)",border:"1px solid rgba(139,92,246,0.25)"}}>
+          <div className="mb-4 p-5 rounded-2xl w-full max-w-md text-center" style={{background:"rgba(0,0,0,0.72)",backdropFilter:"blur(12px)",border:"1px solid rgba(139,92,246,0.3)"}}>
             <span className="text-[10px] uppercase tracking-widest block mb-1" style={{color:"rgba(255,255,255,0.3)"}}>Mål</span>
             <span className="text-6xl font-extrabold" style={{color:"#8B5CF6"}}>
               {currentTarget===25?"Bull":currentTarget}
@@ -235,7 +236,7 @@ function ATCGame({config,navigate}){
 
         {/* ===== COMPLETED ===== */}
         {completed&&(
-          <div className="mb-4 p-6 rounded-2xl w-full max-w-md text-center" style={{background:"rgba(139,92,246,0.1)",border:"1px solid rgba(139,92,246,0.3)"}}>
+          <div className="mb-4 p-6 rounded-2xl w-full max-w-md text-center" style={{background:"rgba(0,0,0,0.82)",backdropFilter:"blur(16px)",border:"1px solid rgba(139,92,246,0.3)"}}>
             <span className="text-sm uppercase tracking-widest block mb-2" style={{color:"rgba(255,255,255,0.3)"}}>Klart!</span>
             <span className="text-4xl font-extrabold block mb-3" style={{color:"#8B5CF6"}}>Alla nummer avklarade!</span>
             <div className="flex justify-center gap-6 mb-4">
@@ -250,15 +251,15 @@ function ATCGame({config,navigate}){
 
         {/* ===== STATS ===== */}
         <div className="grid grid-cols-3 gap-3 mb-4 w-full max-w-md">
-          <div className="p-3 rounded-xl text-center" style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.06)"}}>
+          <div className="p-3 rounded-xl text-center" style={{background:"rgba(0,0,0,0.72)",backdropFilter:"blur(12px)",border:"1px solid rgba(255,255,255,0.08)"}}>
             <span className="text-[10px] uppercase tracking-widest block" style={{color:"rgba(255,255,255,0.3)"}}>Pilar</span>
             <span className="text-3xl font-extrabold" style={{color:"rgba(255,255,255,0.8)"}}>{totalDarts}</span>
           </div>
-          <div className="p-3 rounded-xl text-center" style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.06)"}}>
+          <div className="p-3 rounded-xl text-center" style={{background:"rgba(0,0,0,0.72)",backdropFilter:"blur(12px)",border:"1px solid rgba(255,255,255,0.08)"}}>
             <span className="text-[10px] uppercase tracking-widest block" style={{color:"rgba(255,255,255,0.3)"}}>Träffar</span>
             <span className="text-3xl font-extrabold" style={{color:"#8B5CF6"}}>{hits}/{numbers.length}</span>
           </div>
-          <div className="p-3 rounded-xl text-center" style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.06)"}}>
+          <div className="p-3 rounded-xl text-center" style={{background:"rgba(0,0,0,0.72)",backdropFilter:"blur(12px)",border:"1px solid rgba(255,255,255,0.08)"}}>
             <span className="text-[10px] uppercase tracking-widest block" style={{color:"rgba(255,255,255,0.3)"}}>Accuracy</span>
             <span className="text-3xl font-extrabold" style={{color:accuracy>=50?"#10B981":"#EF4444"}}>{accuracy}%</span>
           </div>
@@ -269,7 +270,8 @@ function ATCGame({config,navigate}){
           <div className="flex items-center justify-center" style={{height:44}}>
             {msg&&(
               <div className="px-6 py-2 rounded-xl" style={{
-                background:msg.type==="good"?"rgba(139,92,246,0.12)":msg.type==="bad"?"rgba(239,68,68,0.12)":"rgba(255,255,255,0.05)",
+                background:"rgba(0,0,0,0.72)",
+                backdropFilter:"blur(8px)",
                 border:`1px solid ${msg.type==="good"?"rgba(139,92,246,0.3)":msg.type==="bad"?"rgba(239,68,68,0.3)":"rgba(255,255,255,0.1)"}`,
               }}>
                 <span className="text-sm font-bold" style={{color:msg.type==="good"?"#8B5CF6":msg.type==="bad"?"#EF4444":"rgba(255,255,255,0.6)"}}>{msg.text}</span>
@@ -280,7 +282,7 @@ function ATCGame({config,navigate}){
 
         {/* Väntar-indikator */}
         {!completed&&(
-          <div className="mb-4 p-6 rounded-2xl w-full max-w-md text-center" style={{background:"rgba(139,92,246,0.05)",border:"1px solid rgba(139,92,246,0.15)"}}>
+          <div className="mb-4 p-6 rounded-2xl w-full max-w-md text-center" style={{background:"rgba(0,0,0,0.72)",backdropFilter:"blur(12px)",border:"1px solid rgba(139,92,246,0.2)"}}>
             <div className="w-3 h-3 rounded-full mx-auto mb-3" style={{background:connected?"#8B5CF6":"#EF4444",animation:"pulse 1.5s ease-in-out infinite"}}/>
             <span className="text-sm" style={{color:"rgba(255,255,255,0.4)"}}>
               {connected?"Väntar på kast...":"Ansluter till kamera..."}
@@ -293,30 +295,30 @@ function ATCGame({config,navigate}){
           <div className="flex items-center gap-3 mt-4">
             <button onClick={handleUndo} disabled={!undoStack.length}
               className="px-5 py-2.5 rounded-xl text-sm font-semibold uppercase tracking-widest transition-all duration-200"
-              style={{background:undoStack.length?"rgba(255,255,255,0.04)":"rgba(255,255,255,0.01)",color:undoStack.length?"rgba(255,255,255,0.4)":"rgba(255,255,255,0.1)",border:undoStack.length?"1px solid rgba(255,255,255,0.08)":"1px solid rgba(255,255,255,0.03)"}}
+              style={{background:undoStack.length?"rgba(0,0,0,0.72)":"rgba(0,0,0,0.40)",backdropFilter:"blur(12px)",color:undoStack.length?"rgba(255,255,255,0.4)":"rgba(255,255,255,0.1)",border:undoStack.length?"1px solid rgba(255,255,255,0.08)":"1px solid rgba(255,255,255,0.03)"}}
               onMouseEnter={(e)=>{if(undoStack.length)e.currentTarget.style.color="#8B5CF6";}}
               onMouseLeave={(e)=>{if(undoStack.length)e.currentTarget.style.color="rgba(255,255,255,0.4)";}}>
               ↩ Ångra
             </button>
             <button onClick={handleManualHit}
               className="px-5 py-2.5 rounded-xl text-sm font-semibold uppercase tracking-widest transition-all duration-200"
-              style={{background:"rgba(139,92,246,0.1)",color:"#8B5CF6",border:"1px solid rgba(139,92,246,0.25)"}}
+              style={{background:"rgba(0,0,0,0.72)",backdropFilter:"blur(12px)",color:"#8B5CF6",border:"1px solid rgba(139,92,246,0.3)"}}
               onMouseEnter={(e)=>e.currentTarget.style.background="rgba(139,92,246,0.2)"}
-              onMouseLeave={(e)=>e.currentTarget.style.background="rgba(139,92,246,0.1)"}>
+              onMouseLeave={(e)=>e.currentTarget.style.background="rgba(0,0,0,0.72)"}>
               Träff ✓
             </button>
             <button onClick={()=>handleThrow({zone:"Miss",value:0,label:"Miss",multiplier:0,number:0})}
               className="px-5 py-2.5 rounded-xl text-sm font-semibold uppercase tracking-widest transition-all duration-200"
-              style={{background:"rgba(239,68,68,0.08)",color:"#EF4444",border:"1px solid rgba(239,68,68,0.2)"}}
+              style={{background:"rgba(0,0,0,0.72)",backdropFilter:"blur(12px)",color:"#EF4444",border:"1px solid rgba(239,68,68,0.3)"}}
               onMouseEnter={(e)=>e.currentTarget.style.background="rgba(239,68,68,0.15)"}
-              onMouseLeave={(e)=>e.currentTarget.style.background="rgba(239,68,68,0.08)"}>
+              onMouseLeave={(e)=>e.currentTarget.style.background="rgba(0,0,0,0.72)"}>
               Miss ✗
             </button>
           </div>
         )}
 
         {/* ===== PROGRESS ===== */}
-        <div className="mt-6 w-full max-w-md">
+        <div className="mt-6 w-full max-w-md p-4 rounded-2xl" style={{background:"rgba(0,0,0,0.72)",backdropFilter:"blur(12px)",border:"1px solid rgba(255,255,255,0.07)"}}>
           <div className="flex items-center gap-3 mb-3">
             <div className="h-px flex-1" style={{background:"linear-gradient(90deg, transparent, rgba(255,255,255,0.08))"}}/>
             <span className="text-[10px] font-semibold uppercase tracking-[0.25em]" style={{color:"rgba(255,255,255,0.2)"}}>Progress</span>
