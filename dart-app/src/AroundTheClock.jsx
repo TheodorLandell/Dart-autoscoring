@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import useDartVision from "./useDartVision";
+import { LiveBoard } from "./LiveScoring";
 
 /*
   ┌─────────────────────────────────────────────────────────────┐
@@ -177,7 +178,7 @@ function ATCGame({config,navigate}){
     handleThrow(dartInfo);
   };
 
-  const { connected, resetBackend } = useDartVision({
+  const { connected, darts, resetBackend } = useDartVision({
     onThrow: handleLiveThrow,
     enabled: !completed,
   });
@@ -198,11 +199,10 @@ function ATCGame({config,navigate}){
   const variantLabel=variant==="any"?"Valfri yta":variant==="single"?"Single":variant==="double"?"Dubbel":"Trippel";
 
   return(
-    <div className="relative min-h-screen overflow-hidden" style={{background:"#000",fontFamily:"'Rajdhani','Segoe UI',sans-serif"}}>
-      <img src="http://localhost:8000/api/stream/camera" alt="" aria-hidden="true" className="absolute inset-0 w-full h-full" style={{objectFit:"cover"}}/>
-      <div className="absolute inset-0 pointer-events-none" style={{background:"linear-gradient(to bottom, rgba(0,0,0,0.6) 0%, rgba(0,0,0,0.15) 40%, rgba(0,0,0,0.15) 60%, rgba(0,0,0,0.65) 100%)"}}/>
+    <div className="relative min-h-screen overflow-hidden" style={{background:"linear-gradient(145deg, #0a0a10 0%, #0f0f18 40%, #0d0d14 100%)",fontFamily:"'Rajdhani','Segoe UI',sans-serif"}}>
+      <div className="absolute inset-0 opacity-[0.03]" style={{backgroundImage:`linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)`,backgroundSize:"60px 60px"}}/>
 
-      <header className="relative z-10 flex items-center px-6 py-3" style={{background:"rgba(0,0,0,0.55)",backdropFilter:"blur(14px)",borderBottom:"1px solid rgba(255,255,255,0.07)"}}>
+      <header className="relative z-10 flex items-center px-6 py-3" style={{borderBottom:"1px solid rgba(255,255,255,0.05)"}}>
         <button onClick={()=>navigate("lobby")} className="flex items-center gap-2 w-20 transition-colors duration-200" style={{color:"rgba(255,255,255,0.3)"}}
           onMouseEnter={(e)=>e.currentTarget.style.color="rgba(255,255,255,0.7)"} onMouseLeave={(e)=>e.currentTarget.style.color="rgba(255,255,255,0.3)"}>
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M10 2L4 8l6 6"/></svg>
@@ -211,24 +211,37 @@ function ATCGame({config,navigate}){
         <div className="flex-1 text-center">
           <span className="text-xl font-extrabold uppercase tracking-wider" style={{color:"#8B5CF6"}}>Around the Clock</span>
         </div>
-        {/* Connection status */}
-        <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg"
-          style={{background:connected?"rgba(139,92,246,0.1)":"rgba(239,68,68,0.1)",border:connected?"1px solid rgba(139,92,246,0.25)":"1px solid rgba(239,68,68,0.25)"}}>
-          <div className="w-2 h-2 rounded-full" style={{background:connected?"#8B5CF6":"#EF4444",boxShadow:connected?"0 0 8px rgba(139,92,246,0.5)":"none",animation:connected?"none":"pulse 1.5s ease-in-out infinite"}}/>
-          <span className="text-[10px] font-bold uppercase tracking-widest" style={{color:connected?"#8B5CF6":"#EF4444"}}>{connected?"Live":"..."}</span>
+        <div className="w-20 flex justify-end">
+          <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg"
+            style={{background:connected?"rgba(139,92,246,0.12)":"rgba(239,68,68,0.12)",border:connected?"1px solid rgba(139,92,246,0.3)":"1px solid rgba(239,68,68,0.3)"}}>
+            <div className="w-1.5 h-1.5 rounded-full" style={{background:connected?"#8B5CF6":"#EF4444",animation:connected?"none":"pulse 1.5s ease-in-out infinite"}}/>
+            <span className="text-[9px] font-bold uppercase tracking-widest" style={{color:connected?"#8B5CF6":"#EF4444"}}>{connected?"Live":"..."}</span>
+          </div>
         </div>
       </header>
 
-      <main className="relative z-10 flex flex-col items-center px-4 pb-12">
+      {/* Top: camera + board */}
+      <div className="relative z-10 flex gap-3 px-4 pt-4 pb-3">
+        <div className="relative flex-1 rounded-xl overflow-hidden" style={{height:260,background:"#0a0a0f",border:"1px solid rgba(255,255,255,0.06)"}}>
+          <img src="http://localhost:8000/api/stream/camera" className="w-full h-full" style={{objectFit:"contain"}}/>
+          <div className="absolute bottom-2 left-2 px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-widest" style={{background:"rgba(0,0,0,0.6)",color:"rgba(255,255,255,0.3)"}}>Kamera + YOLO</div>
+        </div>
+        <div className="w-56 rounded-xl p-3 flex flex-col" style={{background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.06)"}}>
+          <span className="text-[9px] font-bold uppercase tracking-widest mb-2" style={{color:"rgba(255,255,255,0.25)"}}>Live board</span>
+          <LiveBoard darts={darts}/>
+        </div>
+      </div>
+
+      <main className="relative z-10 px-4 pb-12">
 
         {/* ===== TARGET ===== */}
         {!completed&&(
-          <div className="mb-4 p-5 rounded-2xl w-full max-w-md text-center" style={{background:"rgba(0,0,0,0.72)",backdropFilter:"blur(12px)",border:"1px solid rgba(139,92,246,0.3)"}}>
+          <div className="mb-4 p-5 rounded-2xl w-full max-w-md mx-auto text-center" style={{background:"rgba(255,255,255,0.02)",border:"1px solid rgba(139,92,246,0.2)"}}>
             <span className="text-[10px] uppercase tracking-widest block mb-1" style={{color:"rgba(255,255,255,0.3)"}}>Mål</span>
             <span className="text-6xl font-extrabold" style={{color:"#8B5CF6"}}>
               {currentTarget===25?"Bull":currentTarget}
             </span>
-            <span className="text-sm block mt-1" style={{color:"rgba(139,92,246,0.6)"}}>
+            <span className="text-sm block mt-1" style={{color:"rgba(139,92,246,0.5)"}}>
               {currentTarget===25?(finish==="bullseye"?"Bullseye (50)":"Single bull (25)"):variantLabel}
             </span>
           </div>
@@ -236,7 +249,7 @@ function ATCGame({config,navigate}){
 
         {/* ===== COMPLETED ===== */}
         {completed&&(
-          <div className="mb-4 p-6 rounded-2xl w-full max-w-md text-center" style={{background:"rgba(0,0,0,0.82)",backdropFilter:"blur(16px)",border:"1px solid rgba(139,92,246,0.3)"}}>
+          <div className="mb-4 p-6 rounded-2xl w-full max-w-md mx-auto text-center" style={{background:"rgba(139,92,246,0.05)",border:"1px solid rgba(139,92,246,0.25)"}}>
             <span className="text-sm uppercase tracking-widest block mb-2" style={{color:"rgba(255,255,255,0.3)"}}>Klart!</span>
             <span className="text-4xl font-extrabold block mb-3" style={{color:"#8B5CF6"}}>Alla nummer avklarade!</span>
             <div className="flex justify-center gap-6 mb-4">
@@ -250,29 +263,28 @@ function ATCGame({config,navigate}){
         )}
 
         {/* ===== STATS ===== */}
-        <div className="grid grid-cols-3 gap-3 mb-4 w-full max-w-md">
-          <div className="p-3 rounded-xl text-center" style={{background:"rgba(0,0,0,0.72)",backdropFilter:"blur(12px)",border:"1px solid rgba(255,255,255,0.08)"}}>
+        <div className="grid grid-cols-3 gap-3 mb-4 w-full max-w-md mx-auto">
+          <div className="p-3 rounded-xl text-center" style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.07)"}}>
             <span className="text-[10px] uppercase tracking-widest block" style={{color:"rgba(255,255,255,0.3)"}}>Pilar</span>
             <span className="text-3xl font-extrabold" style={{color:"rgba(255,255,255,0.8)"}}>{totalDarts}</span>
           </div>
-          <div className="p-3 rounded-xl text-center" style={{background:"rgba(0,0,0,0.72)",backdropFilter:"blur(12px)",border:"1px solid rgba(255,255,255,0.08)"}}>
+          <div className="p-3 rounded-xl text-center" style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.07)"}}>
             <span className="text-[10px] uppercase tracking-widest block" style={{color:"rgba(255,255,255,0.3)"}}>Träffar</span>
             <span className="text-3xl font-extrabold" style={{color:"#8B5CF6"}}>{hits}/{numbers.length}</span>
           </div>
-          <div className="p-3 rounded-xl text-center" style={{background:"rgba(0,0,0,0.72)",backdropFilter:"blur(12px)",border:"1px solid rgba(255,255,255,0.08)"}}>
+          <div className="p-3 rounded-xl text-center" style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.07)"}}>
             <span className="text-[10px] uppercase tracking-widest block" style={{color:"rgba(255,255,255,0.3)"}}>Accuracy</span>
             <span className="text-3xl font-extrabold" style={{color:accuracy>=50?"#10B981":"#EF4444"}}>{accuracy}%</span>
           </div>
         </div>
 
         {/* Message */}
-        <div className="w-full max-w-md" style={{minHeight:44}}>
+        <div className="w-full max-w-md mx-auto" style={{minHeight:44}}>
           <div className="flex items-center justify-center" style={{height:44}}>
             {msg&&(
               <div className="px-6 py-2 rounded-xl" style={{
-                background:"rgba(0,0,0,0.72)",
-                backdropFilter:"blur(8px)",
-                border:`1px solid ${msg.type==="good"?"rgba(139,92,246,0.3)":msg.type==="bad"?"rgba(239,68,68,0.3)":"rgba(255,255,255,0.1)"}`,
+                background:msg.type==="good"?"rgba(139,92,246,0.05)":msg.type==="bad"?"rgba(239,68,68,0.05)":"rgba(255,255,255,0.02)",
+                border:`1px solid ${msg.type==="good"?"rgba(139,92,246,0.25)":msg.type==="bad"?"rgba(239,68,68,0.25)":"rgba(255,255,255,0.08)"}`,
               }}>
                 <span className="text-sm font-bold" style={{color:msg.type==="good"?"#8B5CF6":msg.type==="bad"?"#EF4444":"rgba(255,255,255,0.6)"}}>{msg.text}</span>
               </div>
@@ -282,7 +294,7 @@ function ATCGame({config,navigate}){
 
         {/* Väntar-indikator */}
         {!completed&&(
-          <div className="mb-4 p-6 rounded-2xl w-full max-w-md text-center" style={{background:"rgba(0,0,0,0.72)",backdropFilter:"blur(12px)",border:"1px solid rgba(139,92,246,0.2)"}}>
+          <div className="mb-4 p-5 rounded-2xl w-full max-w-md mx-auto text-center" style={{background:"rgba(255,255,255,0.02)",border:"1px solid rgba(139,92,246,0.15)"}}>
             <div className="w-3 h-3 rounded-full mx-auto mb-3" style={{background:connected?"#8B5CF6":"#EF4444",animation:"pulse 1.5s ease-in-out infinite"}}/>
             <span className="text-sm" style={{color:"rgba(255,255,255,0.4)"}}>
               {connected?"Väntar på kast...":"Ansluter till kamera..."}
@@ -292,33 +304,33 @@ function ATCGame({config,navigate}){
 
         {/* Korrigeringsknappar */}
         {!completed&&(
-          <div className="flex items-center gap-3 mt-4">
+          <div className="flex items-center gap-3 mt-4 justify-center">
             <button onClick={handleUndo} disabled={!undoStack.length}
               className="px-5 py-2.5 rounded-xl text-sm font-semibold uppercase tracking-widest transition-all duration-200"
-              style={{background:undoStack.length?"rgba(0,0,0,0.72)":"rgba(0,0,0,0.40)",backdropFilter:"blur(12px)",color:undoStack.length?"rgba(255,255,255,0.4)":"rgba(255,255,255,0.1)",border:undoStack.length?"1px solid rgba(255,255,255,0.08)":"1px solid rgba(255,255,255,0.03)"}}
+              style={{background:undoStack.length?"rgba(255,255,255,0.05)":"rgba(255,255,255,0.02)",color:undoStack.length?"rgba(255,255,255,0.4)":"rgba(255,255,255,0.1)",border:undoStack.length?"1px solid rgba(255,255,255,0.08)":"1px solid rgba(255,255,255,0.03)"}}
               onMouseEnter={(e)=>{if(undoStack.length)e.currentTarget.style.color="#8B5CF6";}}
               onMouseLeave={(e)=>{if(undoStack.length)e.currentTarget.style.color="rgba(255,255,255,0.4)";}}>
               ↩ Ångra
             </button>
             <button onClick={handleManualHit}
               className="px-5 py-2.5 rounded-xl text-sm font-semibold uppercase tracking-widest transition-all duration-200"
-              style={{background:"rgba(0,0,0,0.72)",backdropFilter:"blur(12px)",color:"#8B5CF6",border:"1px solid rgba(139,92,246,0.3)"}}
+              style={{background:"rgba(139,92,246,0.1)",color:"#8B5CF6",border:"1px solid rgba(139,92,246,0.25)"}}
               onMouseEnter={(e)=>e.currentTarget.style.background="rgba(139,92,246,0.2)"}
-              onMouseLeave={(e)=>e.currentTarget.style.background="rgba(0,0,0,0.72)"}>
+              onMouseLeave={(e)=>e.currentTarget.style.background="rgba(139,92,246,0.1)"}>
               Träff ✓
             </button>
             <button onClick={()=>handleThrow({zone:"Miss",value:0,label:"Miss",multiplier:0,number:0})}
               className="px-5 py-2.5 rounded-xl text-sm font-semibold uppercase tracking-widest transition-all duration-200"
-              style={{background:"rgba(0,0,0,0.72)",backdropFilter:"blur(12px)",color:"#EF4444",border:"1px solid rgba(239,68,68,0.3)"}}
-              onMouseEnter={(e)=>e.currentTarget.style.background="rgba(239,68,68,0.15)"}
-              onMouseLeave={(e)=>e.currentTarget.style.background="rgba(0,0,0,0.72)"}>
+              style={{background:"rgba(239,68,68,0.1)",color:"#EF4444",border:"1px solid rgba(239,68,68,0.25)"}}
+              onMouseEnter={(e)=>e.currentTarget.style.background="rgba(239,68,68,0.2)"}
+              onMouseLeave={(e)=>e.currentTarget.style.background="rgba(239,68,68,0.1)"}>
               Miss ✗
             </button>
           </div>
         )}
 
         {/* ===== PROGRESS ===== */}
-        <div className="mt-6 w-full max-w-md p-4 rounded-2xl" style={{background:"rgba(0,0,0,0.72)",backdropFilter:"blur(12px)",border:"1px solid rgba(255,255,255,0.07)"}}>
+        <div className="mt-6 w-full max-w-md mx-auto p-4 rounded-2xl" style={{background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.06)"}}>
           <div className="flex items-center gap-3 mb-3">
             <div className="h-px flex-1" style={{background:"linear-gradient(90deg, transparent, rgba(255,255,255,0.08))"}}/>
             <span className="text-[10px] font-semibold uppercase tracking-[0.25em]" style={{color:"rgba(255,255,255,0.2)"}}>Progress</span>
@@ -331,7 +343,7 @@ function ATCGame({config,navigate}){
               return(
                 <div key={i} className="w-10 h-10 rounded-lg flex items-center justify-center text-sm font-bold transition-all duration-200"
                   style={{
-                    background:done?"rgba(139,92,246,0.2)":active?"rgba(139,92,246,0.1)":"rgba(255,255,255,0.02)",
+                    background:done?"rgba(139,92,246,0.2)":active?"rgba(139,92,246,0.08)":"rgba(255,255,255,0.02)",
                     border:active?"2px solid #8B5CF6":done?"1px solid rgba(139,92,246,0.3)":"1px solid rgba(255,255,255,0.05)",
                     color:done?"#8B5CF6":active?"#A78BFA":"rgba(255,255,255,0.15)",
                   }}>

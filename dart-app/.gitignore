@@ -12,6 +12,15 @@ dist
 dist-ssr
 *.local
 
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Backend runtime files
+backend/dartvision.db
+backend/.dartvision_secret
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

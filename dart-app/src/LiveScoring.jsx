@@ -24,7 +24,7 @@ const WS_URL = "ws://localhost:8000/ws/scoring";
 const BN = [20,1,18,4,13,6,10,15,2,17,3,19,7,16,8,11,14,9,12,5];
 
 /* ============ DARTBOARD SVG ============ */
-function LiveBoard({ darts = [] }) {
+export function LiveBoard({ darts = [] }) {
   const cx = 200, cy = 200, R = 170;
 
   return (

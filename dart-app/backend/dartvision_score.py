@@ -56,7 +56,7 @@ WIRE_TOLERANCE_MM = 2.0
 # ============================================================
 DEDUP_DISTANCE_MM = 20.0       # ökad från 15 → robustare vid homografi-error
 SCORED_DEDUP_MM = 25.0         # radie för att undvika dubbelregistrering i scoreboard
-BOARD_RADIUS_MAX_MM = 200.0    # homografi-validering: max avstånd från centrum
+BOARD_RADIUS_MAX_MM = 500.0    # homografi-validering: max avstånd från centrum (utökad för foam-träffar)
 
 # Tracker
 TRACK_MATCH_MM = 18.0          # max avstånd för att matcha detektion → befintlig track
@@ -158,9 +158,10 @@ class CameraCalibration:
         warped = cv2.perspectiveTransform(pt, self.H)[0][0]
         x_mm, y_mm = pixel_to_mm(warped[0], warped[1])
 
-        # Validering: kassera om transformationen hamnar långt utanför tavlan
+        # Validering: kassera om transformationen hamnar extremt utanför tavlan (troligen defekt homografi)
         r = math.sqrt(x_mm**2 + y_mm**2)
         if r > BOARD_RADIUS_MAX_MM:
+            print(f"  [HOMOGRAFI] Kasserad: r={r:.0f}mm > {BOARD_RADIUS_MAX_MM:.0f}mm — troligen defekt homografi")
             return None, None
 
         return x_mm, y_mm
@@ -664,10 +665,19 @@ class DartVisionPipeline:
 
         # ---- Kolla om nya pilar att registrera ----
         if current_count > self.prev_confirmed_count:
+            print(f"\n  [NY PIL] {current_count} bekräftade tracks (var {self.prev_confirmed_count}):")
+            for track in confirmed_tracks:
+                r_debug = math.sqrt(track.smooth_x**2 + track.smooth_y**2)
+                zi_debug = score_from_mm(track.smooth_x, track.smooth_y)
+                print(f"    id={track.id} zone={zi_debug[0]} r={r_debug:.0f}mm "
+                      f"pos=({track.smooth_x:.1f},{track.smooth_y:.1f})mm "
+                      f"conf={track.conf:.2f} scored={track.scored}")
+
             for track in confirmed_tracks:
                 if track.scored:
                     continue
                 if track.conf < CONF_SCORE_MIN:
+                    print(f"    → id={track.id} HOPPAS ÖVER (conf={track.conf:.2f} < {CONF_SCORE_MIN})")
                     continue
 
                 pos = (track.smooth_x, track.smooth_y)
@@ -686,7 +696,9 @@ class DartVisionPipeline:
                     self.scored_positions.append(pos)
                     track.scored = True
                     print(f"  KAST: {zone} = {score} ({track.cam}) "
-                          f"[conf={track.conf:.2f}, hits={track.hits}]")
+                          f"[r={r_mm:.0f}mm, conf={track.conf:.2f}, hits={track.hits}]")
+                else:
+                    print(f"    → id={track.id} DEDUP — för nära tidigare registrerad position")
 
             self.prev_confirmed_count = current_count
 

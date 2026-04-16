@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import useDartVision from "./useDartVision";
+import { LiveBoard } from "./LiveScoring";
 
 /*
   ┌─────────────────────────────────────────────────────────────┐
@@ -136,7 +137,7 @@ export default function Game121({navigate}){
     handleThrow(dartInfo);
   };
 
-  const { connected, resetBackend } = useDartVision({
+  const { connected, darts, resetBackend } = useDartVision({
     onThrow: handleLiveThrow,
     enabled: true,
   });
@@ -164,14 +165,11 @@ export default function Game121({navigate}){
   };
 
   return(
-    <div className="relative min-h-screen overflow-hidden" style={{background:"#000",fontFamily:"'Rajdhani','Segoe UI',sans-serif"}}>
-
-      {/* Kamerafeed som bakgrund */}
-      <img src="http://localhost:8000/api/stream/camera" alt="" aria-hidden="true" className="absolute inset-0 w-full h-full" style={{objectFit:"cover"}}/>
-      <div className="absolute inset-0 pointer-events-none" style={{background:"linear-gradient(to bottom, rgba(0,0,0,0.6) 0%, rgba(0,0,0,0.15) 40%, rgba(0,0,0,0.15) 60%, rgba(0,0,0,0.65) 100%)"}}/>
+    <div className="relative min-h-screen overflow-hidden" style={{background:"linear-gradient(145deg, #0a0a10 0%, #0f0f18 40%, #0d0d14 100%)",fontFamily:"'Rajdhani','Segoe UI',sans-serif"}}>
+      <div className="absolute inset-0 opacity-[0.03]" style={{backgroundImage:`linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)`,backgroundSize:"60px 60px"}}/>
 
       {/* Header */}
-      <header className="relative z-10 flex items-center px-6 py-3" style={{background:"rgba(0,0,0,0.55)",backdropFilter:"blur(14px)",borderBottom:"1px solid rgba(255,255,255,0.07)"}}>
+      <header className="relative z-10 flex items-center px-6 py-3" style={{borderBottom:"1px solid rgba(255,255,255,0.05)"}}>
         <button onClick={()=>navigate("lobby")} className="flex items-center gap-2 transition-colors duration-200 w-20" style={{color:"rgba(255,255,255,0.3)"}}
           onMouseEnter={(e)=>e.currentTarget.style.color="rgba(255,255,255,0.7)"} onMouseLeave={(e)=>e.currentTarget.style.color="rgba(255,255,255,0.3)"}>
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M10 2L4 8l6 6"/></svg>
@@ -195,32 +193,44 @@ export default function Game121({navigate}){
         </div>
       </header>
 
-      <main className="relative z-10 flex flex-col items-center px-4 pb-12">
+      {/* Top: camera + board */}
+      <div className="relative z-10 flex gap-3 px-4 pt-4 pb-3">
+        <div className="relative flex-1 rounded-xl overflow-hidden" style={{height:260,background:"#0a0a0f",border:"1px solid rgba(255,255,255,0.06)"}}>
+          <img src="http://localhost:8000/api/stream/camera" className="w-full h-full" style={{objectFit:"contain"}}/>
+          <div className="absolute bottom-2 left-2 px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-widest" style={{background:"rgba(0,0,0,0.6)",color:"rgba(255,255,255,0.3)"}}>Kamera + YOLO</div>
+        </div>
+        <div className="w-56 rounded-xl p-3 flex flex-col" style={{background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.06)"}}>
+          <span className="text-[9px] font-bold uppercase tracking-widest mb-2" style={{color:"rgba(255,255,255,0.25)"}}>Live board</span>
+          <LiveBoard darts={darts}/>
+        </div>
+      </div>
+
+      <main className="relative z-10 px-4 pb-12">
 
         {/* Scoreboard */}
-        <div className="grid grid-cols-3 gap-3 mb-4 w-full max-w-md">
-          <div className="p-4 rounded-xl text-center" style={{background:"rgba(0,0,0,0.72)",border:"1px solid rgba(16,185,129,0.3)",backdropFilter:"blur(12px)"}}>
+        <div className="grid grid-cols-3 gap-3 mb-4 w-full max-w-md mx-auto">
+          <div className="p-4 rounded-xl text-center" style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(16,185,129,0.2)"}}>
             <span className="text-[10px] uppercase tracking-widest block" style={{color:"rgba(255,255,255,0.4)"}}>Nivå</span>
             <span className="text-4xl font-extrabold" style={{color:"#10B981"}}>{level}</span>
           </div>
-          <div className="p-4 rounded-xl text-center" style={{background:"rgba(0,0,0,0.72)",border:"1px solid rgba(16,185,129,0.3)",backdropFilter:"blur(12px)"}}>
+          <div className="p-4 rounded-xl text-center" style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(16,185,129,0.2)"}}>
             <span className="text-[10px] uppercase tracking-widest block" style={{color:"rgba(255,255,255,0.4)"}}>Poäng kvar</span>
             <span className="text-4xl font-extrabold" style={{color:"rgba(255,255,255,0.95)"}}>{score}</span>
           </div>
-          <div className="p-4 rounded-xl text-center" style={{background:"rgba(0,0,0,0.72)",border:"1px solid rgba(16,185,129,0.3)",backdropFilter:"blur(12px)"}}>
+          <div className="p-4 rounded-xl text-center" style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(16,185,129,0.2)"}}>
             <span className="text-[10px] uppercase tracking-widest block" style={{color:"rgba(255,255,255,0.4)"}}>Pilar</span>
             <span className="text-4xl font-extrabold" style={{color:dartsLeft<=2?"#EF4444":"rgba(255,255,255,0.8)"}}>{dartsLeft}</span>
             <span className="text-[10px] block" style={{color:"rgba(255,255,255,0.25)"}}>av {maxDarts}</span>
           </div>
         </div>
 
-        <div className="mb-3 text-xs" style={{color:"rgba(255,255,255,0.35)"}}>
+        <div className="mb-3 text-xs text-center" style={{color:"rgba(255,255,255,0.35)"}}>
           Högsta nivå: <span className="font-bold" style={{color:"#10B981"}}>{highestLevel}</span>
         </div>
 
         {/* Checkout */}
         {checkout&&(
-          <div className="mb-4 px-5 py-3 rounded-xl w-full max-w-md text-center" style={{background:"rgba(0,0,0,0.72)",border:"1px solid rgba(139,92,246,0.35)",backdropFilter:"blur(12px)"}}>
+          <div className="mb-4 px-5 py-3 rounded-xl w-full max-w-md mx-auto text-center" style={{background:"rgba(255,255,255,0.02)",border:"1px solid rgba(139,92,246,0.25)"}}>
             <span className="text-[10px] uppercase tracking-widest block mb-1" style={{color:"rgba(255,255,255,0.4)"}}>Checkout</span>
             <div className="flex items-center justify-center gap-2">
               {checkout.split(" ").map((c,i)=>(
@@ -230,24 +240,23 @@ export default function Game121({navigate}){
           </div>
         )}
         {!checkout&&score>1&&(
-          <div className="mb-4 px-5 py-2 rounded-xl text-center" style={{background:"rgba(0,0,0,0.55)",border:"1px solid rgba(255,255,255,0.08)"}}>
+          <div className="mb-4 px-5 py-2 rounded-xl text-center max-w-md mx-auto" style={{background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.06)"}}>
             <span className="text-xs" style={{color:"rgba(255,255,255,0.3)"}}>Ingen checkout — kasta för att justera</span>
           </div>
         )}
 
         {/* Meddelande */}
         {msg&&(
-          <div className="mb-3 px-6 py-2.5 rounded-xl" style={{
-            background:"rgba(0,0,0,0.75)",
-            border:`1px solid ${msg.type==="good"?"rgba(16,185,129,0.4)":msg.type==="bad"?"rgba(239,68,68,0.4)":"rgba(255,255,255,0.12)"}`,
-            backdropFilter:"blur(8px)",
+          <div className="mb-3 px-6 py-2.5 rounded-xl max-w-md mx-auto" style={{
+            background:`1px solid ${msg.type==="good"?"rgba(16,185,129,0.05)":msg.type==="bad"?"rgba(239,68,68,0.05)":"rgba(255,255,255,0.02)"}`,
+            border:`1px solid ${msg.type==="good"?"rgba(16,185,129,0.3)":msg.type==="bad"?"rgba(239,68,68,0.3)":"rgba(255,255,255,0.1)"}`,
           }}>
             <span className="text-sm font-bold" style={{color:msg.type==="good"?"#10B981":msg.type==="bad"?"#EF4444":"rgba(255,255,255,0.6)"}}>{msg.text}</span>
           </div>
         )}
 
         {/* Pil-indikatorer */}
-        <div className="flex gap-1.5 mt-3 mb-4">
+        <div className="flex gap-1.5 mt-3 mb-4 justify-center">
           {Array.from({length:maxDarts}).map((_,i)=>(
             <div key={i} className="w-3 h-3 rounded-full transition-all duration-200" style={{background:i<dartsUsed?"#10B981":"rgba(255,255,255,0.12)"}}/>
           ))}
@@ -255,7 +264,7 @@ export default function Game121({navigate}){
 
         {/* Väntar-indikator */}
         {dartsLeft>0&&(
-          <div className="mb-4 p-6 rounded-2xl w-full max-w-md text-center" style={{background:"rgba(0,0,0,0.72)",border:"1px solid rgba(16,185,129,0.2)",backdropFilter:"blur(12px)"}}>
+          <div className="mb-4 p-5 rounded-2xl w-full max-w-md mx-auto text-center" style={{background:"rgba(255,255,255,0.02)",border:"1px solid rgba(16,185,129,0.15)"}}>
             <div className="w-3 h-3 rounded-full mx-auto mb-3" style={{background:connected?"#10B981":"#EF4444",animation:"pulse 1.5s ease-in-out infinite"}}/>
             <span className="text-sm" style={{color:"rgba(255,255,255,0.5)"}}>
               {connected?"Väntar på kast...":"Ansluter till kamera..."}
@@ -267,35 +276,35 @@ export default function Game121({navigate}){
         <div className="flex items-center gap-2 mt-4 flex-wrap justify-center">
           <button onClick={handleUndo} disabled={!undoStack.length}
             className="px-4 py-2 rounded-xl text-xs font-semibold uppercase tracking-widest transition-all duration-200"
-            style={{background:undoStack.length?"rgba(255,255,255,0.07)":"rgba(255,255,255,0.02)",color:undoStack.length?"rgba(255,255,255,0.5)":"rgba(255,255,255,0.15)",border:undoStack.length?"1px solid rgba(255,255,255,0.12)":"1px solid rgba(255,255,255,0.04)"}}
+            style={{background:undoStack.length?"rgba(255,255,255,0.05)":"rgba(255,255,255,0.02)",color:undoStack.length?"rgba(255,255,255,0.5)":"rgba(255,255,255,0.15)",border:undoStack.length?"1px solid rgba(255,255,255,0.1)":"1px solid rgba(255,255,255,0.04)"}}
             onMouseEnter={(e)=>{if(undoStack.length){e.currentTarget.style.color="#10B981";}}}
             onMouseLeave={(e)=>{if(undoStack.length){e.currentTarget.style.color="rgba(255,255,255,0.5)";}}}>
             ↩ Ångra
           </button>
           <button onClick={()=>handleThrow({zone:"Miss",value:0,label:"Miss",multiplier:0,number:0})}
             className="px-4 py-2 rounded-xl text-xs font-semibold uppercase tracking-widest transition-all duration-200"
-            style={{background:"rgba(239,68,68,0.12)",color:"#EF4444",border:"1px solid rgba(239,68,68,0.3)"}}
-            onMouseEnter={(e)=>e.currentTarget.style.background="rgba(239,68,68,0.22)"}
-            onMouseLeave={(e)=>e.currentTarget.style.background="rgba(239,68,68,0.12)"}>
+            style={{background:"rgba(239,68,68,0.1)",color:"#EF4444",border:"1px solid rgba(239,68,68,0.25)"}}
+            onMouseEnter={(e)=>e.currentTarget.style.background="rgba(239,68,68,0.2)"}
+            onMouseLeave={(e)=>e.currentTarget.style.background="rgba(239,68,68,0.1)"}>
             Miss
           </button>
           <button onClick={resetRound} className="px-4 py-2 rounded-xl text-xs font-semibold uppercase tracking-widest transition-all duration-200"
-            style={{background:"rgba(255,255,255,0.07)",color:"rgba(255,255,255,0.5)",border:"1px solid rgba(255,255,255,0.12)"}}
+            style={{background:"rgba(255,255,255,0.05)",color:"rgba(255,255,255,0.5)",border:"1px solid rgba(255,255,255,0.1)"}}
             onMouseEnter={(e)=>{e.currentTarget.style.color="rgba(255,255,255,0.8)";}}
             onMouseLeave={(e)=>{e.currentTarget.style.color="rgba(255,255,255,0.5)";}}>
             ↺ Reset
           </button>
           <button onClick={()=>setShowEditor(true)} className="px-5 py-2 rounded-xl text-xs font-semibold uppercase tracking-widest transition-all duration-200"
-            style={{background:"rgba(16,185,129,0.15)",color:"#10B981",border:"1px solid rgba(16,185,129,0.35)"}}
-            onMouseEnter={(e)=>e.currentTarget.style.background="rgba(16,185,129,0.25)"}
-            onMouseLeave={(e)=>e.currentTarget.style.background="rgba(16,185,129,0.15)"}>
+            style={{background:"rgba(16,185,129,0.12)",color:"#10B981",border:"1px solid rgba(16,185,129,0.3)"}}
+            onMouseEnter={(e)=>e.currentTarget.style.background="rgba(16,185,129,0.22)"}
+            onMouseLeave={(e)=>e.currentTarget.style.background="rgba(16,185,129,0.12)"}>
             Korrigera
           </button>
         </div>
 
         {/* Inställningar */}
         {showSettings&&(
-          <div className="mt-4 p-5 rounded-xl w-full max-w-md" style={{background:"rgba(0,0,0,0.78)",border:"1px solid rgba(255,255,255,0.1)",backdropFilter:"blur(14px)"}}>
+          <div className="mt-4 p-5 rounded-xl w-full max-w-md mx-auto" style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.08)"}}>
             <span className="text-xs font-bold uppercase tracking-widest block mb-3" style={{color:"rgba(255,255,255,0.4)"}}>Inställningar</span>
             <div className="flex gap-4 mb-3">
               <div className="flex-1">
@@ -310,7 +319,7 @@ export default function Game121({navigate}){
               </div>
             </div>
             <button onClick={applySettings} className="w-full py-2.5 rounded-xl text-xs font-bold uppercase tracking-widest"
-              style={{background:"rgba(16,185,129,0.2)",color:"#10B981",border:"1px solid rgba(16,185,129,0.4)"}}>
+              style={{background:"rgba(16,185,129,0.15)",color:"#10B981",border:"1px solid rgba(16,185,129,0.35)"}}>
               Spara
             </button>
           </div>
@@ -318,15 +327,15 @@ export default function Game121({navigate}){
 
         {/* Historik */}
         {history.length>0&&(
-          <div className="mt-6 w-full max-w-md">
+          <div className="mt-6 w-full max-w-md mx-auto">
             <div className="flex items-center gap-3 mb-3">
-              <div className="h-px flex-1" style={{background:"linear-gradient(90deg, transparent, rgba(255,255,255,0.12))"}}/>
-              <span className="text-[10px] font-semibold uppercase tracking-[0.25em]" style={{color:"rgba(255,255,255,0.35)"}}>Historik</span>
-              <div className="h-px flex-1" style={{background:"linear-gradient(90deg, rgba(255,255,255,0.12), transparent)"}}/>
+              <div className="h-px flex-1" style={{background:"linear-gradient(90deg, transparent, rgba(255,255,255,0.1))"}}/>
+              <span className="text-[10px] font-semibold uppercase tracking-[0.25em]" style={{color:"rgba(255,255,255,0.3)"}}>Historik</span>
+              <div className="h-px flex-1" style={{background:"linear-gradient(90deg, rgba(255,255,255,0.1), transparent)"}}/>
             </div>
             <div className="flex flex-col gap-1.5">
               {history.map((h,i)=>(
-                <div key={i} className="flex items-center justify-between px-4 py-2 rounded-lg" style={{background:"rgba(0,0,0,0.60)",border:"1px solid rgba(255,255,255,0.07)",backdropFilter:"blur(8px)"}}>
+                <div key={i} className="flex items-center justify-between px-4 py-2 rounded-lg" style={{background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.06)"}}>
                   <div className="flex items-center gap-2">
                     <span className="text-xs" style={{color:"rgba(255,255,255,0.3)"}}>{h.ts}</span>
                     <span className="text-sm font-semibold" style={{color:"rgba(255,255,255,0.7)"}}>Nivå {h.level}</span>
