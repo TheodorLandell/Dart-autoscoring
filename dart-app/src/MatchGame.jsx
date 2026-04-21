@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import useDartVision from "./useDartVision";
 import { LiveBoard } from "./LiveScoring";
+import { generateBotThrow } from "./dartBot";
 
 /*
   ┌─────────────────────────────────────────────────────────────┐
@@ -136,8 +137,12 @@ export default function MatchGame({ navigate, matchConfig, isTournament = false,
   const [totThrown,setTotThrown]=useState(()=>players.map(()=>0));
   const [rndCount,setRndCount]=useState(()=>players.map(()=>0));
   const [editing,setEditing]=useState(null);
+  const [manualEntry,setManualEntry]=useState(false);
   const [gameOver,setGameOver]=useState(false);
   const confirmingRef=useRef(false);
+  const cDartsRef=useRef([null,null,null]);
+  const botTimeoutRef=useRef(null);   // pekare till botens pågående setTimeout
+  const [botTrigger,setBotTrigger]=useState(0); // ökas för att tvinga om bot-effecten
   const [winner,setWinner]=useState(null);
   const [bust,setBust]=useState(null);
   const [finalLegsWon, setFinalLegsWon] = useState(null);
@@ -152,8 +157,79 @@ export default function MatchGame({ navigate, matchConfig, isTournament = false,
   const checkout=useMemo(()=>{if(proj<=0)return null;return getCheckout(proj,left);},[proj,left]);
   const getAvg=(i)=>rndCount[i]===0?"–":(totThrown[i]/rndCount[i]).toFixed(1);
 
+  useEffect(()=>{cDartsRef.current=cDarts;},[cDarts]);
+
+  const isBot = !gameOver && cp?.type === "bot";
+
+  /* ===== BOT-TUR ===== */
+  useEffect(()=>{
+    if(!isBot) return;
+    if(gameOver) return;
+    if(cDartsRef.current.some(Boolean)) return; // Ångra-tillstånd: pilar visas redan
+
+    // Avbryt eventuellt pågående timeout
+    if(botTimeoutRef.current){ clearTimeout(botTimeoutRef.current); botTimeoutRef.current=null; }
+
+    const avg = cp.avgScore ?? 40;
+    let remaining = cs;
+    let nd = [null, null, null];
+    let bustNs = null;
+    let checkoutAtPil = -1;
+
+    for(let i = 0; i < 3; i++){
+      if(remaining <= 1) break;
+      const dart = generateBotThrow(avg, remaining);
+      nd[i] = dart;
+      const ns = remaining - dart.value;
+
+      if(ns === 0 && dart.multiplier === 2){ checkoutAtPil = i; break; }
+      if(ns <= 0 || ns === 1){ bustNs = ns; break; }
+      remaining = ns;
+    }
+
+    const scored = nd.reduce((s,d)=>s+(d?d.value:0),0);
+    cDartsRef.current = nd;
+    setCDarts(nd);
+
+    botTimeoutRef.current = setTimeout(()=>{
+      botTimeoutRef.current = null;
+      if(checkoutAtPil >= 0){
+        setTotThrown(p=>{const n=[...p];n[cpIdx]+=scored;return n;});
+        setRndCount(p=>{const n=[...p];n[cpIdx]++;return n;});
+        const nl=[...legsWon];nl[cpIdx]++;
+        if(nl[cpIdx]>=legsToWin){
+          setScores(p=>{const n=[...p];n[cpIdx]=0;return n;});
+          setLegsWon(nl);setWinner(cp);setGameOver(true);setFinalLegsWon(nl);
+        } else {
+          setHistory(p=>[...p,{pi:cpIdx,darts:nd,sb:cs,bust:false}]);
+          setLegsWon(nl);setScores(players.map(()=>startingScore));
+          cDartsRef.current=[null,null,null];setCDarts([null,null,null]);setCpIdx(0);
+        }
+      } else if(bustNs !== null){
+        const bMsg = bustNs < 0 ? "Bust! Under noll" : "Bust! Kvar: 1";
+        setBust(bMsg);
+        setTimeout(()=>setBust(null),2500);
+        setHistory(p=>[...p,{pi:cpIdx,darts:nd,sb:cs,bust:true}]);
+        setRndCount(p=>{const n=[...p];n[cpIdx]++;return n;});
+        cDartsRef.current=[null,null,null];setCDarts([null,null,null]);setCpIdx(p=>(p+1)%players.length);
+      } else {
+        setHistory(p=>[...p,{pi:cpIdx,darts:[...nd],sb:cs,bust:false}]);
+        setTotThrown(p=>{const n=[...p];n[cpIdx]+=scored;return n;});
+        setRndCount(p=>{const n=[...p];n[cpIdx]++;return n;});
+        setScores(p=>{const n=[...p];n[cpIdx]-=scored;return n;});
+        cDartsRef.current=[null,null,null];setCDarts([null,null,null]);setCpIdx(p=>(p+1)%players.length);
+      }
+    },400);
+    return ()=>{ if(botTimeoutRef.current){ clearTimeout(botTimeoutRef.current); botTimeoutRef.current=null; } };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[isBot, cpIdx, botTrigger]);
+
   const applyDart=(di)=>{
-    const nd=[...cDarts];nd[thrown]=di;
+    const cur=cDartsRef.current;
+    const thrownNow=cur.filter(Boolean).length;
+    if(thrownNow>=3)return;
+    const nd=[...cur];nd[thrownNow]=di;
+    cDartsRef.current=nd; // synkron uppdatering — nästa snabb-anrop ser rätt slot
     const nt=nd.reduce((s,d)=>s+(d?d.value:0),0);
     const ns=cs-nt;
 
@@ -180,7 +256,7 @@ export default function MatchGame({ navigate, matchConfig, isTournament = false,
     }
 
     setCDarts(nd);
-    if(thrown+1>=3)setTimeout(()=>confirmRound(nd),300);
+    if(thrownNow+1>=3)setTimeout(()=>confirmRound(nd),300);
   };
 
   const confirmRound=(d)=>{
@@ -195,9 +271,10 @@ export default function MatchGame({ navigate, matchConfig, isTournament = false,
     setCDarts([null,null,null]);setCpIdx(p=>(p+1)%players.length);
   };
 
-  /* ===== LIVE AUTO-SCORING (alltid aktiverad) ===== */
+  /* ===== LIVE AUTO-SCORING (inaktiverad under botens tur) ===== */
   const handleLiveThrow = (dartInfo) => {
     if (gameOver) return;
+    if (isBot) return; // ignorera WS-events under botens tur
     const currentThrown = cDarts.filter(Boolean).length;
     if (currentThrown >= 3) return;
     applyDart(dartInfo);
@@ -205,7 +282,7 @@ export default function MatchGame({ navigate, matchConfig, isTournament = false,
 
   const { connected, darts, resetBackend } = useDartVision({
     onThrow: handleLiveThrow,
-    enabled: !gameOver,
+    enabled: !gameOver && !isBot,
   });
 
   /* Reset backend vid mount */
@@ -214,11 +291,23 @@ export default function MatchGame({ navigate, matchConfig, isTournament = false,
   }, [resetBackend]);
 
   const handleUndo=()=>{
+    // Om boten har ett pågående kast: avbryt det och trigga om bot-effekten
+    if(botTimeoutRef.current){
+      clearTimeout(botTimeoutRef.current);
+      botTimeoutRef.current=null;
+      cDartsRef.current=[null,null,null];
+      setCDarts([null,null,null]);
+      setBotTrigger(t=>t+1); // tvingar om bot-effekten med nya slumptal
+      return;
+    }
     const lastIdx=cDarts.reduce((l,d,i)=>(d?i:l),-1);
-    if(lastIdx>=0){const n=[...cDarts];n[lastIdx]=null;setCDarts(n);return;}
+    if(lastIdx>=0){const n=[...cDarts];n[lastIdx]=null;cDartsRef.current=n;setCDarts(n);return;}
     if(history.length===0)return;
     const lr=history[history.length-1];setHistory(p=>p.slice(0,-1));
-    setCpIdx(lr.pi);setCDarts(lr.darts);
+    // Om föregående runda var botens: återställ tomma pilar så bot-effekten kastar om
+    const restoredDarts=players[lr.pi]?.type==="bot"?[null,null,null]:lr.darts;
+    cDartsRef.current=restoredDarts;
+    setCpIdx(lr.pi);setCDarts(restoredDarts);
     setScores(p=>{const n=[...p];n[lr.pi]=lr.sb;return n;});
     if(!lr.bust){const t=lr.darts.reduce((s,d)=>s+(d?d.value:0),0);setTotThrown(p=>{const n=[...p];n[lr.pi]-=t;return n;});}
     setRndCount(p=>{const n=[...p];n[lr.pi]=Math.max(0,n[lr.pi]-1);return n;});
@@ -305,18 +394,6 @@ export default function MatchGame({ navigate, matchConfig, isTournament = false,
           </div>
         )}
 
-        {/* ===== CURRENT PLAYER ===== */}
-        {!gameOver&&(
-          <div className="mb-3 px-6 py-3 rounded-xl flex items-center gap-4" style={{background:"rgba(255,255,255,0.03)",border:`1px solid ${PC[cpIdx%PC.length]}30`}}>
-            <div className="w-4 h-4 rounded-full" style={{background:PC[cpIdx%PC.length]}}/>
-            <span className="text-2xl font-extrabold" style={{color:PC[cpIdx%PC.length]}}>{cp.name}</span>
-            <span className="text-xl font-bold ml-2" style={{color:"rgba(255,255,255,0.75)"}}>{proj}</span>
-            <span className="text-sm ml-2 px-2 py-0.5 rounded-md" style={{background:"rgba(255,255,255,0.06)",color:"rgba(255,255,255,0.4)"}}>
-              AVG {getAvg(cpIdx)}
-            </span>
-          </div>
-        )}
-
         {bust&&(<div className="mb-3 px-6 py-2.5 rounded-xl" style={{background:"rgba(239,68,68,0.1)",border:"1px solid rgba(239,68,68,0.3)"}}><span className="text-base font-bold" style={{color:"#EF4444"}}>{bust}</span></div>)}
 
         {/* ===== DART SLOTS + KNAPPAR + CHECKOUT ===== */}
@@ -338,7 +415,14 @@ export default function MatchGame({ navigate, matchConfig, isTournament = false,
                 onMouseEnter={(e)=>{if(canUndo){e.currentTarget.style.color="#EF4444";e.currentTarget.style.borderColor="rgba(239,68,68,0.4)";}}}
                 onMouseLeave={(e)=>{if(canUndo){e.currentTarget.style.color="rgba(255,255,255,0.5)";e.currentTarget.style.borderColor="rgba(255,255,255,0.1)";}}}> ↩ Ångra
               </button>
-              {thrown<3&&(
+              <button onClick={()=>setManualEntry(true)} disabled={thrown>=3||isBot}
+                className="px-5 py-2.5 rounded-xl text-sm font-semibold uppercase tracking-widest transition-all duration-200"
+                style={{background:thrown<3&&!isBot?"rgba(255,255,255,0.05)":"rgba(255,255,255,0.02)",color:thrown<3&&!isBot?"rgba(255,255,255,0.5)":"rgba(255,255,255,0.15)",border:thrown<3&&!isBot?"1px solid rgba(255,255,255,0.1)":"1px solid rgba(255,255,255,0.04)",cursor:thrown<3&&!isBot?"pointer":"default"}}
+                onMouseEnter={(e)=>{if(thrown<3&&!isBot)e.currentTarget.style.color="rgba(255,255,255,0.8)";}}
+                onMouseLeave={(e)=>{if(thrown<3&&!isBot)e.currentTarget.style.color="rgba(255,255,255,0.5)";}}>
+                ⚙ Manuell
+              </button>
+              {thrown<3&&!isBot&&(
                 <button onClick={()=>applyDart({zone:"Miss",value:0,label:"Miss",multiplier:0,number:0})}
                   className="px-5 py-2.5 rounded-xl text-sm font-semibold uppercase tracking-widest transition-all duration-200"
                   style={{background:"rgba(239,68,68,0.08)",color:"#EF4444",border:"1px solid rgba(239,68,68,0.25)"}}
@@ -346,7 +430,7 @@ export default function MatchGame({ navigate, matchConfig, isTournament = false,
                   onMouseLeave={(e)=>e.currentTarget.style.background="rgba(239,68,68,0.08)"}> Miss
                 </button>
               )}
-              {thrown>0&&(
+              {thrown>0&&!isBot&&(
                 <button onClick={()=>confirmRound(null)} className="px-6 py-2.5 rounded-xl text-sm font-semibold uppercase tracking-widest transition-all duration-200"
                   style={{background:"rgba(16,185,129,0.1)",color:"#10B981",border:"1px solid rgba(16,185,129,0.3)"}}
                   onMouseEnter={(e)=>e.currentTarget.style.background="rgba(16,185,129,0.2)"} onMouseLeave={(e)=>e.currentTarget.style.background="rgba(16,185,129,0.1)"}> Bekräfta runda
@@ -385,7 +469,7 @@ export default function MatchGame({ navigate, matchConfig, isTournament = false,
                       <span className="text-lg font-bold" style={{color:act?"rgba(255,255,255,0.95)":"rgba(255,255,255,0.65)"}}>{p.name}</span>
                       <div className="flex items-center gap-2 mt-0.5">
                         <span className="text-sm font-semibold" style={{color:"rgba(255,255,255,0.35)"}}>AVG: <span style={{color:c+"CC"}}>{getAvg(i)}</span></span>
-                        {act&&<span className="text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded" style={{background:c+"20",color:c}}>Kastar</span>}
+                        {act&&<span className="text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded" style={{background:c+"20",color:c}}>{p.type==="bot"?"🤖 Kastar":"Kastar"}</span>}
                       </div>
                     </div>
                   </div>
@@ -409,6 +493,13 @@ export default function MatchGame({ navigate, matchConfig, isTournament = false,
           onSelect={(di)=>{const n=[...cDarts];n[editing]={...n[editing],...di};setCDarts(n);setEditing(null);}}
           onUndo={()=>{setEditing(null);handleUndo();}}
           onClose={()=>setEditing(null)}
+        />
+      )}
+      {manualEntry&&thrown<3&&(
+        <ScoreEditor
+          onSelect={(di)=>{setManualEntry(false);applyDart(di);}}
+          onUndo={()=>{setManualEntry(false);handleUndo();}}
+          onClose={()=>setManualEntry(false)}
         />
       )}
 

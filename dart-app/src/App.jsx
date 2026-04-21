@@ -22,14 +22,38 @@ export default function App() {
 
   /* ===== AUTO-RESTORE SESSION ===== */
   useEffect(() => {
+    // Visa cachad användare direkt — ingen fördröjning vid laddning
+    const cached = localStorage.getItem("dart_user")
+    if (cached) {
+      try { setUser(JSON.parse(cached)) } catch (_) {}
+    }
+
     const token = localStorage.getItem("dart_token")
     if (!token) return
+
+    // Bakgrundsvalidering mot backend
     fetch("http://localhost:8000/api/auth/me", {
       headers: { Authorization: `Bearer ${token}` },
     })
-      .then((res) => (res.ok ? res.json() : Promise.reject()))
-      .then((data) => setUser(data.user))
-      .catch(() => localStorage.removeItem("dart_token"))
+      .then((res) => {
+        if (res.status === 401) {
+          // Token ogiltig — logga ut ordentligt
+          localStorage.removeItem("dart_token")
+          localStorage.removeItem("dart_user")
+          setUser(null)
+          return null
+        }
+        return res.ok ? res.json() : null
+      })
+      .then((data) => {
+        if (data) {
+          localStorage.setItem("dart_user", JSON.stringify(data.user))
+          setUser(data.user)
+        }
+      })
+      .catch(() => {
+        // Nätverksfel — backend nere, behåll cachad inloggning
+      })
   }, [])
 
   const navigate = (p, data) => {

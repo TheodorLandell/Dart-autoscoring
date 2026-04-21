@@ -35,10 +35,10 @@ export function LiveBoard({ darts = [] }) {
         const ea = ((i + 1) * 18 - 99) * (Math.PI / 180);
         const ev = i % 2 === 0;
         return [
-          { i: 99, o: R, f: ev ? "#1a1a1a" : "#f0e6d3" },
-          { i: 95, o: 99, f: ev ? "#e8373e" : "#1b8a42" },
-          { i: 57, o: 95, f: ev ? "#1a1a1a" : "#f0e6d3" },
-          { i: 53, o: 57, f: ev ? "#e8373e" : "#1b8a42" },
+          { i: 162, o: R,   f: ev ? "#e8373e" : "#1b8a42" },  // DUBBEL (162-170)
+          { i: 107, o: 162, f: ev ? "#1a1a1a" : "#f0e6d3" }, // Yttre singel (107-162)
+          { i: 99,  o: 107, f: ev ? "#e8373e" : "#1b8a42" },  // TREDUBBEL (99-107)
+          { i: 15.9,o: 99,  f: ev ? "#1a1a1a" : "#f0e6d3" }, // Inre singel (15.9-99)
         ].map((r, ri) => {
           const x1 = cx + r.i * Math.cos(sa), y1 = cy + r.i * Math.sin(sa);
           const x2 = cx + r.o * Math.cos(sa), y2 = cy + r.o * Math.sin(sa);
@@ -52,8 +52,8 @@ export function LiveBoard({ darts = [] }) {
           );
         });
       })}
-      <circle cx={cx} cy={cy} r={31.8} fill="#1b8a42" stroke="#333" strokeWidth="0.5" opacity="0.6" />
-      <circle cx={cx} cy={cy} r={12.7} fill="#e8373e" stroke="#333" strokeWidth="0.5" opacity="0.6" />
+      <circle cx={cx} cy={cy} r={15.9} fill="#1b8a42" stroke="#333" strokeWidth="0.5" opacity="0.6" />
+      <circle cx={cx} cy={cy} r={6.35} fill="#e8373e" stroke="#333" strokeWidth="0.5" opacity="0.6" />
 
       {/* Siffror */}
       {BN.map((n, i) => {

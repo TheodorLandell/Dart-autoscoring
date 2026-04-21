@@ -248,7 +248,7 @@ export default function Game121({navigate}){
         {/* Meddelande */}
         {msg&&(
           <div className="mb-3 px-6 py-2.5 rounded-xl max-w-md mx-auto" style={{
-            background:`1px solid ${msg.type==="good"?"rgba(16,185,129,0.05)":msg.type==="bad"?"rgba(239,68,68,0.05)":"rgba(255,255,255,0.02)"}`,
+            background:msg.type==="good"?"rgba(16,185,129,0.05)":msg.type==="bad"?"rgba(239,68,68,0.05)":"rgba(255,255,255,0.02)",
             border:`1px solid ${msg.type==="good"?"rgba(16,185,129,0.3)":msg.type==="bad"?"rgba(239,68,68,0.3)":"rgba(255,255,255,0.1)"}`,
           }}>
             <span className="text-sm font-bold" style={{color:msg.type==="good"?"#10B981":msg.type==="bad"?"#EF4444":"rgba(255,255,255,0.6)"}}>{msg.text}</span>
@@ -280,6 +280,13 @@ export default function Game121({navigate}){
             onMouseEnter={(e)=>{if(undoStack.length){e.currentTarget.style.color="#10B981";}}}
             onMouseLeave={(e)=>{if(undoStack.length){e.currentTarget.style.color="rgba(255,255,255,0.5)";}}}>
             ↩ Ångra
+          </button>
+          <button onClick={()=>setShowEditor(true)}
+            className="px-4 py-2 rounded-xl text-xs font-semibold uppercase tracking-widest transition-all duration-200"
+            style={{background:"rgba(255,255,255,0.05)",color:"rgba(255,255,255,0.5)",border:"1px solid rgba(255,255,255,0.1)"}}
+            onMouseEnter={(e)=>e.currentTarget.style.color="rgba(255,255,255,0.8)"}
+            onMouseLeave={(e)=>e.currentTarget.style.color="rgba(255,255,255,0.5)"}>
+            ⚙ Manuell
           </button>
           <button onClick={()=>handleThrow({zone:"Miss",value:0,label:"Miss",multiplier:0,number:0})}
             className="px-4 py-2 rounded-xl text-xs font-semibold uppercase tracking-widest transition-all duration-200"

@@ -115,6 +115,7 @@ export default function LoginPage({ navigate, user: _user, setUser }) {
       }
 
       localStorage.setItem("dart_token", data.token);
+      localStorage.setItem("dart_user", JSON.stringify(data.user));
       setUser(data.user);
       setLoading(false);
       navigate("profile");

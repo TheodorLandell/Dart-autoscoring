@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import useDartVision from "./useDartVision";
 import { LiveBoard } from "./LiveScoring";
+import { generateBotBullThrow } from "./dartBot";
 
 /*
   ┌─────────────────────────────────────────────────────────────┐
@@ -50,10 +51,39 @@ export default function ThrowForBull({
   // Reset backend once on mount so prior throws don't interfere
   useEffect(() => { resetBackend(); }, [resetBackend]);
 
+  // ── BOT AUTO-THROW ────────────────────────────────────────
+  // Triggas varje gång currentIndex ändras. Om spelaren är en bot →
+  // generera kastposition direkt och hoppa vidare.
+  useEffect(() => {
+    if (!isThrowingPhase) return;
+    const player = players[currentIndex];
+    if (!player || player.type !== "bot") return;
+
+    const result = generateBotBullThrow(player.avgScore ?? 40);
+    const playerIdx = throwsRef.current.length;
+
+    const newThrows = [
+      ...throwsRef.current,
+      { playerIndex: playerIdx, x_mm: result.x_mm, y_mm: result.y_mm, dist: result.dist, zone: "BOT", isBot: true },
+    ];
+    throwsRef.current = newThrows;
+    setThrows(newThrows);
+
+    if (newThrows.length >= players.length) {
+      setPhase("results");
+      setSelectedStarterIdx(0);
+    } else {
+      setCurrentIndex(newThrows.length);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentIndex, isThrowingPhase]);
+
   // ── MAIN DETECTION EFFECT ──────────────────────────────────
   // Watch darts state (updated ~30fps from WS) for newly scored darts.
   useEffect(() => {
     if (!isThrowingPhase) return;
+    // Bot-spelare hanteras i eget effect — skippa kamera-detection
+    if (players[currentIndex]?.type === "bot") return;
 
     for (const dart of darts) {
       if (!dart.scored) continue;
@@ -234,12 +264,19 @@ export default function ThrowForBull({
           )}
         </div>
 
-        {/* Mini board */}
+        {/* Mini board — inkl. bot-kast som syntetiska pilar */}
         <div className="w-56 rounded-xl p-3 flex flex-col" style={{background:"rgba(255,255,255,0.02)", border:"1px solid rgba(255,255,255,0.06)"}}>
           <span className="text-[9px] font-bold uppercase tracking-widest mb-2" style={{color:"rgba(255,255,255,0.25)"}}>
             Live board
           </span>
-          <LiveBoard darts={darts}/>
+          <LiveBoard darts={[
+            ...darts,
+            ...throws.filter(t=>t.isBot).map(t=>({
+              svg_x: 200 + t.x_mm * (170/170),
+              svg_y: 200 + t.y_mm * (170/170),
+              zone:"BOT", score:0, scored:true, conf:1,
+            })),
+          ]}/>
         </div>
       </div>
 
@@ -258,24 +295,26 @@ export default function ThrowForBull({
                 Pil {currentIndex + 1} av {players.length}
               </span>
               <span className="text-xl font-extrabold block" style={{color:accentColor}}>
-                {currentPlayer?.name}
+                {currentPlayer?.type==="bot"?"🤖 ":""}{currentPlayer?.name}
               </span>
               <span className="text-sm mt-0.5 block" style={{color:"rgba(255,255,255,0.35)"}}>
-                Kasta din pil mot bull!
+                {currentPlayer?.type==="bot" ? "Boten kastar automatiskt..." : "Kasta din pil mot bull!"}
               </span>
             </div>
 
-            {/* Waiting */}
-            <div className="mb-4 p-4 rounded-xl w-full max-w-md mx-auto text-center"
-              style={{background:"rgba(255,255,255,0.02)", border:"1px solid rgba(255,255,255,0.06)"}}>
-              <div className="w-2.5 h-2.5 rounded-full mx-auto mb-2" style={{
-                background: connected ? "#10B981" : "#EF4444",
-                animation: "pulse 1.5s ease-in-out infinite",
-              }}/>
-              <span className="text-sm" style={{color:"rgba(255,255,255,0.4)"}}>
-                {connected ? "Väntar på kast..." : "Ansluter till kamera..."}
-              </span>
-            </div>
+            {/* Waiting — döljs för bot-spelare */}
+            {currentPlayer?.type !== "bot" && (
+              <div className="mb-4 p-4 rounded-xl w-full max-w-md mx-auto text-center"
+                style={{background:"rgba(255,255,255,0.02)", border:"1px solid rgba(255,255,255,0.06)"}}>
+                <div className="w-2.5 h-2.5 rounded-full mx-auto mb-2" style={{
+                  background: connected ? "#10B981" : "#EF4444",
+                  animation: "pulse 1.5s ease-in-out infinite",
+                }}/>
+                <span className="text-sm" style={{color:"rgba(255,255,255,0.4)"}}>
+                  {connected ? "Väntar på kast..." : "Ansluter till kamera..."}
+                </span>
+              </div>
+            )}
 
             {/* Buttons */}
             <div className="flex items-center gap-3 justify-center mb-5">
@@ -328,7 +367,7 @@ export default function ThrowForBull({
                         </span>
                         <div className="w-3 h-3 rounded-full flex-shrink-0" style={{background:pColor}}/>
                         <span className="text-sm font-bold" style={{color: isSel ? "#10B981" : "rgba(255,255,255,0.7)"}}>
-                          {p?.name}
+                          {p?.type==="bot"?"🤖 ":""}{p?.name}
                         </span>
                         {isSel && (
                           <span className="text-[10px] font-bold uppercase tracking-widest" style={{color:"#10B981"}}>
@@ -389,7 +428,7 @@ export default function ThrowForBull({
                   color:      isCurrent ? pColor : "rgba(255,255,255,0.3)",
                 }}>
                 <div className="w-2 h-2 rounded-full" style={{background:pColor, opacity: thrown ? 0.4 : 1}}/>
-                {p.name}
+                {p.type==="bot"?"🤖 ":""}{p.name}
                 {thrown && <span style={{color:"rgba(255,255,255,0.2)"}}>✓</span>}
               </div>
             );

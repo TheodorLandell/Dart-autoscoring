@@ -114,6 +114,7 @@ export default function ProfilePage({ navigate, user, setUser }) {
 
   const handleLogout = () => {
     localStorage.removeItem("dart_token");
+    localStorage.removeItem("dart_user");
     setUser(null);
     navigate("lobby");
   };
