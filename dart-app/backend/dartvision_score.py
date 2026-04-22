@@ -11,7 +11,7 @@ Förbättringar över v2:
   4. Homografi-validering – kasserar transformationer som hamnar utanför
      tavlan (r > DOUBLE_OUTER + marginal)
   5. Confidence-gating – separerar visningströskel från scoring-tröskel
-  6. Ökad dedup-radie (20mm) + scored_positions-radie (25mm)
+  6. Kamera-medveten dedup: samma kamera 8mm, kors-kamera 20mm
   7. Ny runda kräver 0-darts i flera frames (undviker falskt reset)
 
 Användning:
@@ -54,12 +54,13 @@ WIRE_TOLERANCE_MM = 2.0
 # ============================================================
 # TUNING-PARAMETRAR (v3)
 # ============================================================
-DEDUP_DISTANCE_MM = 20.0       # ökad från 15 → robustare vid homografi-error
-SCORED_DEDUP_MM = 25.0         # radie för att undvika dubbelregistrering i scoreboard
+DEDUP_SAME_CAM_MM = 8.0        # samma kamera: max avstånd för att merga två bbox till samma pil
+DEDUP_CROSS_CAM_MM = 20.0      # kors-kamera: max avstånd för att merga L- och R-detektion av samma pil
 BOARD_RADIUS_MAX_MM = 500.0    # homografi-validering: max avstånd från centrum (utökad för foam-träffar)
 
 # Tracker
-TRACK_MATCH_MM = 18.0          # max avstånd för att matcha detektion → befintlig track
+TRACK_MATCH_MM = 18.0          # max avstånd för att matcha detektion → oscorad track
+SCORED_MATCH_MM = 5.0          # max avstånd för att matcha detektion → redan scorad track
 TRACK_MIN_HITS = 3             # frames en pil måste synas innan den räknas
 TRACK_MAX_AGE = 8              # frames utan detektion innan track dör
 TRACK_SMOOTH_ALPHA = 0.4       # EMA-faktor (lägre = mer smoothing)
@@ -215,7 +216,8 @@ class DartTrack:
 
     @property
     def is_dead(self):
-        return self.age > TRACK_MAX_AGE
+        # Scorade tracks lever tills pilar dras ut (explicit reset) — förhindrar re-detektion som nytt kast
+        return self.age > TRACK_MAX_AGE and not self.scored
 
 
 class DartTracker:
@@ -236,17 +238,19 @@ class DartTracker:
         matched_tracks = set()
         matched_dets = set()
 
-        # Bygg kostnadsmatris
+        # Bygg kostnadsmatris — scorade tracks matchas inom SCORED_MATCH_MM (liten radie)
+        # så att en ny pil > 5 mm ifrån en scorad skapar en ny track istället för att slås ihop
         costs = []
         for di, det in enumerate(detections):
             if "board_x_mm" not in det or det["board_x_mm"] is None:
                 continue
             for ti, track in enumerate(self.tracks):
+                threshold = SCORED_MATCH_MM if track.scored else TRACK_MATCH_MM
                 d = dist_mm(
                     (det["board_x_mm"], det["board_y_mm"]),
                     (track.smooth_x, track.smooth_y)
                 )
-                if d < TRACK_MATCH_MM:
+                if d < threshold:
                     costs.append((d, di, ti))
 
         # Sortera på avstånd, greedy match
@@ -376,8 +380,10 @@ class ScoreBoard:
 # ============================================================
 def deduplicate_darts(detections):
     """
-    Merge detektioner från båda kamerorna i board-space.
-    Pilar inom DEDUP_DISTANCE_MM → samma pil → behåll högst confidence.
+    Merge detektioner i board-space.
+    - Samma kamera: DEDUP_SAME_CAM_MM (liten radie — förhindrar dubbla bbox för en pil)
+    - Kors-kamera: DEDUP_CROSS_CAM_MM (större radie — hanterar kalibrerings-offset mellan L och R)
+    Behåller detektionen med högst confidence vid merge.
     """
     if not detections:
         return []
@@ -396,11 +402,13 @@ def deduplicate_darts(detections):
         for j in range(i + 1, len(sorted_dets)):
             if used[j]:
                 continue
+            same_cam = det["cam"] == sorted_dets[j]["cam"]
+            threshold = DEDUP_SAME_CAM_MM if same_cam else DEDUP_CROSS_CAM_MM
             d = dist_mm(
                 (det["board_x_mm"], det["board_y_mm"]),
                 (sorted_dets[j]["board_x_mm"], sorted_dets[j]["board_y_mm"]),
             )
-            if d < DEDUP_DISTANCE_MM:
+            if d < threshold:
                 used[j] = True
 
     return kept
@@ -468,9 +476,6 @@ class DartVisionPipeline:
         self.stable_count = 0
         self.stable_frames = 0
         self.zero_frames = 0
-
-        # Scored positions (förhindrar dubbelregistrering)
-        self.scored_positions = []
 
         self.debug_mode = False
         self.frame_num = 0
@@ -649,7 +654,6 @@ class DartVisionPipeline:
         if current_count == 0:
             self.zero_frames += 1
             if self.zero_frames >= ZERO_FRAMES_REQUIRED and self.prev_confirmed_count > 0:
-                self.scored_positions.clear()
                 self.tracker.clear()
                 self.prev_confirmed_count = 0
                 self.stable_count = 0
@@ -679,26 +683,12 @@ class DartVisionPipeline:
                 if track.conf < CONF_SCORE_MIN:
                     print(f"    → id={track.id} HOPPAS ÖVER (conf={track.conf:.2f} < {CONF_SCORE_MIN})")
                     continue
-
-                pos = (track.smooth_x, track.smooth_y)
-
-                # Kolla mot redan registrerade positioner
-                is_new = True
-                for prev_pos in self.scored_positions:
-                    if dist_mm(pos, prev_pos) < SCORED_DEDUP_MM:
-                        is_new = False
-                        break
-
-                if is_new:
-                    zone, score, mult, sector, r_mm, angle, is_edge = \
-                        score_from_mm(track.smooth_x, track.smooth_y)
-                    self.scoreboard.add_throw(zone, score, is_edge, track.cam)
-                    self.scored_positions.append(pos)
-                    track.scored = True
-                    print(f"  KAST: {zone} = {score} ({track.cam}) "
-                          f"[r={r_mm:.0f}mm, conf={track.conf:.2f}, hits={track.hits}]")
-                else:
-                    print(f"    → id={track.id} DEDUP — för nära tidigare registrerad position")
+                zone, score, mult, sector, r_mm, angle, is_edge = \
+                    score_from_mm(track.smooth_x, track.smooth_y)
+                self.scoreboard.add_throw(zone, score, is_edge, track.cam)
+                track.scored = True
+                print(f"  KAST: {zone} = {score} ({track.cam}) "
+                      f"[r={r_mm:.0f}mm, conf={track.conf:.2f}, hits={track.hits}]")
 
             self.prev_confirmed_count = current_count
 
@@ -764,9 +754,9 @@ def main():
     print(f"\nDartVision v3 (optimerad)")
     print(f"  Feed:    {f_w}x{f_h} @ {fps:.0f}fps")
     print(f"  Conf:    display>{CONF_DISPLAY_MIN}  score>{CONF_SCORE_MIN}")
-    print(f"  Dedup:   {DEDUP_DISTANCE_MM}mm  Scored-dedup: {SCORED_DEDUP_MM}mm")
-    print(f"  Tracker: match={TRACK_MATCH_MM}mm  min_hits={TRACK_MIN_HITS}  "
-          f"max_age={TRACK_MAX_AGE}  alpha={TRACK_SMOOTH_ALPHA}")
+    print(f"  Dedup:   same-cam={DEDUP_SAME_CAM_MM}mm  cross-cam={DEDUP_CROSS_CAM_MM}mm")
+    print(f"  Tracker: match={TRACK_MATCH_MM}mm (scorad:{SCORED_MATCH_MM}mm)  "
+          f"min_hits={TRACK_MIN_HITS}  max_age={TRACK_MAX_AGE}  alpha={TRACK_SMOOTH_ALPHA}")
     print(f"  Stabil:  {STABLE_FRAMES_REQUIRED} frames  Zero: {ZERO_FRAMES_REQUIRED} frames")
     print(f"  Tip:     offset={args.tip_offset} (adaptiv)")
     print(f"  Kalib:   L={'JA' if args.calib_left else 'NEJ'} "
