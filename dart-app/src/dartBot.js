@@ -209,6 +209,51 @@ export function generateBotThrow(avgPerRound, currentScore) {
 }
 
 /* ─────────────────────────────────────────────────────────
+   SVG-POSITION FÖR BOT-PIL (mini-board i MatchGame)
+   Konverterar zone-sträng → {svg_x, svg_y} för LiveBoard.
+   Center (200,200), 1 enhet = 1 mm, Y ökar nedåt i SVG.
+   Sektor 20 (index 0) sitter i toppen: vinkel -90°.
+   ───────────────────────────────────────────────────────── */
+export function botDartToSvg(zone) {
+  const aJitter = () => (Math.random() - 0.5) * 16 * Math.PI / 180; // ±8°
+
+  if (zone === "D-Bull") {
+    const r = Math.random() * 4;
+    const a = Math.random() * 2 * Math.PI;
+    return { svg_x: 200 + r * Math.cos(a), svg_y: 200 + r * Math.sin(a) };
+  }
+  if (zone === "Bull") {
+    const r = 8 + Math.random() * 6;
+    const a = Math.random() * 2 * Math.PI;
+    return { svg_x: 200 + r * Math.cos(a), svg_y: 200 + r * Math.sin(a) };
+  }
+  if (zone === "Miss") {
+    const r = 178 + Math.random() * 16;
+    const a = Math.random() * 2 * Math.PI;
+    return { svg_x: 200 + r * Math.cos(a), svg_y: 200 + r * Math.sin(a) };
+  }
+
+  const m = zone.match(/^([STD])(\d+)$/);
+  if (!m) return { svg_x: 200, svg_y: 200 };
+
+  const mult = m[1];
+  const num  = parseInt(m[2], 10);
+  const idx  = SECTORS.indexOf(num);
+  if (idx === -1) return { svg_x: 200, svg_y: 200 };
+
+  const a = (idx * 18 - 90) * Math.PI / 180 + aJitter();
+  let r;
+  if      (mult === "D") r = 166 + (Math.random() - 0.5) * 6;
+  else if (mult === "T") r = 103 + (Math.random() - 0.5) * 6;
+  else                   r = 35  + Math.random() * 60;   // inre singel 35–95 mm
+
+  return {
+    svg_x: 200 + r * Math.cos(a),
+    svg_y: 200 + r * Math.sin(a),
+  };
+}
+
+/* ─────────────────────────────────────────────────────────
    BULL-KAST för ThrowForBull
    Returnerar { x_mm, y_mm, dist }
    Hög avg → nära centrum; låg avg → längre bort

@@ -71,9 +71,12 @@ export function LiveBoard({ darts = [] }) {
       {/* Live dart-positioner */}
       {darts.map((d, i) => {
         const isScored = d.scored;
-        const color = d.score >= 40 ? "#F59E0B" : d.score === 0 ? "#EF4444" : "#10B981";
+        const color = d.color || (d.score >= 40 ? "#F59E0B" : d.score === 0 ? "#EF4444" : "#10B981");
         return (
-          <g key={i}>
+          <g key={i} style={d.isNew ? {
+            transformOrigin: `${d.svg_x}px ${d.svg_y}px`,
+            animation: "dart-pop 0.2s ease-out",
+          } : undefined}>
             {/* Pulsande glow */}
             <circle cx={d.svg_x} cy={d.svg_y} r="12" fill={color} opacity="0.15">
               <animate attributeName="r" values="8;14;8" dur="1.5s" repeatCount="indefinite" />
@@ -542,6 +545,10 @@ export default function LiveScoring({ navigate }) {
         @keyframes slideIn {
           from { transform: translateX(-10px); opacity: 0; }
           to { transform: translateX(0); opacity: 1; }
+        }
+        @keyframes dart-pop {
+          from { transform: scale(0); }
+          to   { transform: scale(1); }
         }
       `}</style>
       <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet" />
