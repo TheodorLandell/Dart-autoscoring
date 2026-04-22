@@ -36,22 +36,79 @@ Kalibreringsfiler (`calib_left.json` / `calib_right.json`) och YOLO-modellen (`b
 
 ---
 
+## Tech Stack
+
+| Lager | Teknologi |
+|-------|-----------|
+| Frontend UI | React 19.2.4 + Vite 8 |
+| Styling | Tailwind CSS v4 (ingen config-fil) |
+| Backend web | FastAPI + Uvicorn |
+| Datorseende | OpenCV + Ultralytics YOLO |
+| Matematik | NumPy |
+| Databas | SQLite (inbyggd Python) |
+| Teckensnitt | Rajdhani (Google Fonts) |
+
+---
+
+## Filstruktur
+
+```
+dart-app/
+├── src/
+│   ├── main.jsx                # React-entry, monterar <App> på #root
+│   ├── index.css               # Enbart: @import "tailwindcss"
+│   ├── App.jsx                 # Huvud-nav, all app-state, session-restore
+│   ├── useDartVision.js        # WebSocket-hook: livscykel, reconnect, resetBackend
+│   ├── dartBot.js              # Bot-logik: generateBotThrow, generateBotBullThrow, botDartToSvg
+│   ├── DartLobby.jsx           # Huvudmeny med spellägesval
+│   ├── MatchSetup.jsx          # Konfigurera 501/301-match (spelare, legs, format, bot-slider)
+│   ├── ThrowForBull.jsx        # Kamera-baserad kastordning; bot auto-kastar
+│   ├── MatchGame.jsx           # Spellogik 501/301, ScoreEditor-modal, bot-animering
+│   ├── Game121.jsx             # 121 checkout-träning med undo-stack
+│   ├── AroundTheClock.jsx      # 1→20→Bull träning, single/double/treble-varianter
+│   ├── TournamentSetup.jsx     # Konfigurera single-elimination bracket
+│   ├── TournamentBracket.jsx   # Visualisera bracket, BracketConnectors SVG, WinnerScreen
+│   ├── LiveScoring.jsx         # Realtidsövervakning + LiveBoard SVG-export
+│   ├── CalibrationPage.jsx     # 41-punkts homografikalibering med ZoomLens
+│   ├── HeatmapPage.jsx         # Sida som visar HeatmapBoard
+│   ├── HeatmapBoard.jsx        # Canvas heatmap: radial gradients → färgkarta → SVG-board
+│   ├── LoginPage.jsx           # Registrering och inloggning
+│   └── ProfilePage.jsx         # Användarstatistik och historik
+│
+└── backend/
+    ├── main.py                 # FastAPI-app, CLI-args, uvicorn-start
+    ├── config.py               # Boardgeometri-konstanter (mm) och server-defaults
+    ├── state.py                # Trådsäker SharedState-singleton (threading.Lock)
+    ├── pipeline_thread.py      # Bakgrundstråd: kamera → YOLO → state + event_queue
+    ├── dartvision_score.py     # Kärnalgoritm: DartTrack, DartTracker, DartVisionPipeline, score_from_mm
+    ├── dart_calibration.py     # Fristående kalibreringsverktyg med OpenCV GUI
+    └── routes/
+        ├── __init__.py         # register_routes(app) samlar alla routers
+        ├── streams.py          # MJPEG-endpoints: camera, board, left, right
+        ├── scoring.py          # WebSocket /ws/scoring + POST /api/reset
+        ├── calibration.py      # GET/POST kalibrering och referenspunkter
+        ├── auth.py             # Registrering, login, token-validering (SQLite)
+        └── status.py           # GET /api/status (kamerastatus, FPS, kalib)
+```
+
+---
+
 ## API-endpoints
 
 ```
-GET  /api/stream/camera              MJPEG (annoterad combined feed)
-GET  /api/stream/board               MJPEG (board overlay)
-GET  /api/stream/left                MJPEG (vänster kamera, ren)
-GET  /api/stream/right               MJPEG (höger kamera, ren)
-GET  /api/snapshot/{cam}             Enstaka JPEG
-WS   /ws/scoring                     WebSocket (kast-events + state)
-POST /api/reset                      Nollställ scores + tracker + event-kö
-POST /api/calibrate                  Beräkna homografi + spara JSON
-GET  /api/calibration/status         Kalibreringsstatus
-GET  /api/calibration/reference-points  41 referenspunkter
-GET  /api/status                     Allmän status (kameror, FPS, kalib)
-POST /api/auth/register              Registrera användare
-POST /api/auth/login                 Logga in, returnerar token
+GET  /api/stream/camera              MJPEG annoterad combined feed
+GET  /api/stream/board               MJPEG board overlay
+GET  /api/stream/left                MJPEG vänster kamera (ren)
+GET  /api/stream/right               MJPEG höger kamera (ren)
+GET  /api/snapshot/{cam}             Enstaka JPEG-frame
+WS   /ws/scoring                     WebSocket: kast-events + state-sync
+POST /api/reset                      Nollställ scores, tracker, event-kö
+POST /api/calibrate                  Beräkna homografi, spara JSON
+GET  /api/calibration/status         Kalibreringsstatus och felstatistik
+GET  /api/calibration/reference-points  41 referenspunkter (px-koordinater)
+GET  /api/status                     Kamerastatus, FPS, kalibreringsstatus
+POST /api/auth/register              Registrera ny användare
+POST /api/auth/login                 Logga in, returnerar token + user
 GET  /api/auth/me                    Validera token, returnerar user-objekt
 ```
 
@@ -62,13 +119,14 @@ GET  /api/auth/me                    Validera token, returnerar user-objekt
 ### Frontend
 
 **Navigation utan React Router**
-All navigation sköts av `navigate(page, data)` i `App.jsx`. `page`-variabeln styr vilken komponent som renderas. App-state (`user`, `matchConfig`, `tournamentConfig`) lever i `App.jsx` och skickas som props. Session auto-återställs via `dart_token` i localStorage (bakgrundsvalidering mot `/api/auth/me`). Lägg till sidor som ett case i `navigate()` och som villkorlig render i `App.jsx`.
+All navigation sköts av `navigate(page, data)` i `App.jsx`. `page`-state-variabeln styr vilken komponent som renderas via villkorliga renders. App-state (`user`, `matchConfig`, `tournamentConfig`, `tournamentMatchId`) lever i `App.jsx` och skickas som props. Session auto-återställs från `dart_token` i localStorage med bakgrundsvalidering mot `/api/auth/me`. Lägg till sidor som case i `navigate()` och som villkorlig render i `App.jsx`.
 
 **Live scoring via WebSocket-hook**
 `useDartVision.js` hanterar hela WebSocket-livscykeln mot `ws://localhost:8000/ws/scoring`:
 - Automatisk återanslutning med exponentiell backoff (max 15 s)
 - `"state"`-meddelanden (synk, innehåller `darts[]`) vs `"throw"` (nytt kast, triggar `onThrow`-callback)
-- `enabled`-prop: när `false` kopplas WS inte upp alls (används under botens tur)
+- `readyRef.current` sätts `false` vid reconnect; ignorerar throw-events de första 500 ms efter anslutning
+- `enabled`-prop: när `false` kopplas WS inte upp alls (används under botens tur i MatchGame)
 - Returnerar `{ connected, darts, resetBackend }`
 
 **Dart-objekt från WebSocket** (format som skickas från `pipeline_thread.py`):
@@ -87,49 +145,98 @@ All navigation sköts av `navigate(page, data)` i `App.jsx`. `page`-variabeln st
 }
 ```
 
-**Standard spelläges-layout** (används i MatchGame, Game121, AroundTheClock, ThrowForBull):
+**Standard spelläges-layout** (MatchGame, Game121, AroundTheClock, ThrowForBull):
 - Header med bakknapp + anslutningsstatus-badge
 - Övre sektion: MJPEG-kamerafeed (flex-1, höjd 260) + mini LiveBoard SVG (w-56) sida vid sida
 - Huvudsektion nedanför: spellägesspecifikt UI
-- Mörk bakgrund `linear-gradient(145deg, #0a0a10 0%, #0f0f18 40%, #0d0d14 100%)` med `opacity-[0.03]` grid-overlay
+- Bakgrund `linear-gradient(145deg, #0a0a10 0%, #0f0f18 40%, #0d0d14 100%)` med `opacity-[0.03]` grid-overlay
 
-**Spellägen**
-- **MatchGame**: 501/301 med checkout-tabell (`CK`-objekt), bust-kontroll, ScoreEditor-modal och ⚙ Manuell-knapp. Bot-stöd: när `cp.type === "bot"` är WS inaktiverad och bot-effekten genererar och bekräftar rundan automatiskt.
-- **Game121**: Starta på 121, checkout på dubbel → level up, bust → level down. Undo-stack, inställningsmodal, ⚙ Manuell-knapp.
-- **AroundTheClock**: Träffa 1→20→Bull i ordning; varianter för single/double/treble.
-- **TournamentBracket**: Single-elimination bracket, auto-byes, BracketConnectors SVG, WinnerScreen.
-- **ThrowForBull**: Kamera-baserad kastordning. Bot-spelare kastas automatiskt via `generateBotBullThrow`. Ångra med `undonePos`-guard (ignorerar re-detektering av samma pil). Hoppa över med `SKIP_DIST=9999`. Resultatfas: klickbar lista för att välja startspelare.
+---
 
-**Bot-spelare (`dartBot.js`)**
+### Spellägen
+
+**MatchGame.jsx** — 501/301
+Centrala states: `scores[]`, `legsWon[]`, `cpIdx` (current player), `cDarts[3]` (aktuella rundan), `history[]` (undo-stack), `totThrown`, `rndCount`, `botThrowing`, `botIndicator`, `bust`, `gameOver`.
+
+Viktiga detaljer:
+- `CK`-objektet (checkout-tabell) är hårdkodat; mappar kvarstående poäng → föreslagen utcheckning
+- `confirmRound()` triggas automatiskt efter tredje pilen (non-bot)
+- `ScoreEditor`-modal för att korrigera fel-detekteringar; ⚙ Manuell-knapp för att fylla slot manuellt
+- Bot-stöd: se Bot-avsnittet nedan
+- `liveBoardDarts = isBot ? cDarts.filter(Boolean) : darts` — byt datakälla för LiveBoard under botens tur
+
+**Game121.jsx**
+Träning: börja på 121, checkout på dubbel → level up, bust → level down. Undo-stack med snapshot av poäng + level. Inställningsmodal för startlevel. ⚙ Manuell-knapp öppnar ScoreEditor.
+
+**AroundTheClock.jsx**
+Träffa sektorer 1→20→Bull i ordning. Varianter: single (S), double (D), treble (T). Manuella Träff/Miss-knappar för korrigering. Accuracy-tracking per sektor.
+
+**ThrowForBull.jsx** — kastordningsavgörning
+Fullt kamera-baserad (inte manuella klick). En kast per spelare i arrayordning. Botspelare (`player.type === "bot"`) kastar automatiskt via `generateBotBullThrow` utan kamera. Spelar in `x_mm`/`y_mm` från `darts`-state, beräknar avstånd till bull, sorterar spelare. Ångra med `undonePos`-guard (ignorerar re-detektering av samma pil). Hoppa över med `SKIP_DIST=9999`. Resultatfas: klickbar lista för att välja startspelare.
+
+**TournamentBracket.jsx**
+Single-elimination bracket med auto-byes för icke-2-potens spelantal. `BracketConnectors`-komponent ritar SVG-linjer mellan matcher. `WinnerScreen` visas när bracket är klar. Matcher delegeras till `MatchGame` via `tournament-match`-page och `handleTournamentMatchComplete`-callback i `App.jsx`.
+
+**LiveScoring.jsx** (fristående sida + LiveBoard-export)
+Fristående realtidsövervakning av scoring-pipeline. Exporterar `LiveBoard`-komponenten (SVG-dartboard med animerade pilmarkeringar) som används på alla spelsidor. LiveBoard stödjer `d.color` för spelarfärgning och `d.isNew` för pop-in CSS-animation (`dart-pop` keyframe: scale 0→1 på 0.2s).
+
+---
+
+### Bot-systemet (`dartBot.js`)
+
 Spelarobjekt: `{ type: "bot", avgScore: number, name: string, id: string }`.
-`avgScore` (15–80) = snitt per RUNDA (3 pilar), 5 nivåer: Nybörjare 15–25 (E≈5.5/pil), Casual 26–40, Medel 41–55, Bra 56–70, Pro 71–80 (E≈25/pil).
-- `generateBotThrow(avgPerRound, currentScore)` — i checkout-läge (≤170) används `CK`-tabellen; annars kalibrerad sannolikhetsfördelning.
-- `generateBotBullThrow(avgScore)` — returnerar `{ x_mm, y_mm, dist }`. Hög avg → nära centrum.
+`avgScore` (15–80) = snitt per runda (3 pilar totalt), 5 nivåer:
 
-**LiveBoard** (exporteras från `LiveScoring.jsx`)
-SVG-dartboard med animerade pilmarkeringar. Tar `darts`-array från `useDartVision`. Boardgeometri Winmau Blade 6 (R=170 mm): Dubbel 162–170, Yttre singel 107–162, Tredubbel 99–107, Inre singel 15.9–99, Outer bull r=15.9, Bull r=6.35.
+| Nivå | avgScore | E per pil |
+|------|----------|-----------|
+| Nybörjare | 15–25 | ≈5.5 |
+| Casual | 26–40 | ≈11 |
+| Medel | 41–55 | ≈16.5 |
+| Bra | 56–70 | ≈21 |
+| Pro | 71–80 | ≈25 |
 
-**Checkout-tabell**
-`CK`-objektet är hårdkodat i `MatchGame.jsx`, `Game121.jsx` och `dartBot.js` — alla tre måste uppdateras om tabellen ändras.
+**`generateBotThrow(avgPerRound, currentScore)`** — returnerar ett dart-objekt. I checkout-läge (≤170) används `CK`-tabellen med träffchans proportionell mot avg. Annars kalibrerad sannolikhetsfördelning.
+
+**`generateBotBullThrow(avgScore)`** — returnerar `{ x_mm, y_mm, dist }` för ThrowForBull. Hög avg → nära centrum.
+
+**`botDartToSvg(zone)`** — konverterar zonstring till SVG-koordinater för LiveBoard-visning under botens tur. Använder `SECTORS.indexOf(num)` och vinkelformeln `(idx*18-90)°` (sektor 20 överst, matchar LiveBoard). Radier: D=166 mm, T=103 mm, S=35–95 mm. Lägger till ±8° vinkeljitter och ±3 mm radiusjitter per kast.
+
+**Bot-animering i MatchGame** (states `botThrowing`, `botIndicator`):
+1. `isBot` → `setBotThrowing(true)`, `setBotIndicator(true)`
+2. Pre-generera alla 3 pilar med `botDartToSvg`-koordinater, spelarfärg (`PC[cpIdx%PC.length]`) och `isNew: true`
+3. Avslöja en pil per sekund via `setTimeout`-array (`timers[]`) — rensas i effect-cleanup
+4. Efter sista pilen: `setBotIndicator(false)`, visa bust-meddelande om bust
+5. Efter `dartsCount * 1000 + 3000` ms: committa rundan, `setBotThrowing(false)`, `setCpIdx(nästa)`
+6. Under `botThrowing`: WS inaktiverad (`enabled={!botThrowing}`), alla knappar låsta, `handleUndo` blockerad
+
+---
+
+### Kalibrering
+
+41 klick i ordning (Bull → 20 Doubles → 20 Triples) på live-kamerafeed i `CalibrationPage.jsx`. `ZoomLens`-komponent (3× förstoring runt muspekaren) för precision. Klienten skickar punkterna till `POST /api/calibrate`; backend kör `cv2.findHomography(..., cv2.RANSAC, 5.0)`, beräknar inliers/medelfel/maxfel och sparar homografimatrisen som JSON. Pipeline hot-reloadar utan omstart.
 
 ---
 
 ### Backend
 
-**Tråddelad state**
-`state.py`: `SharedState`-singleton med `threading.Lock()`. Pipeline-tråden skriver; API-routes läser. Attribut: `frames` (JPEG bytes), `darts` (live-positioner), `throws` (poängsatta kast), `event_queue` (deque max 200), FPS, kalibreringsstatus.
+**Tråddelad state** (`state.py`)
+`SharedState`-singleton med `threading.Lock()`. Pipeline-tråden skriver; HTTP/WS-routes läser. Attribut: `frames` (JPEG-bytes per kamera), `darts` (live-positioner), `throws` (poängsatta kast), `event_queue` (deque max 200), FPS, kalibreringsstatus.
 
 **Pipeline-tråden** (`pipeline_thread.py`)
-Oändlig loop: kamera-capture → YOLO-inferens → tracking → homografi → `score_from_mm()` → state-uppdatering med lock → push throw-events till `event_queue`.
+Oändlig loop:
+1. Kamera-capture (en eller två kameror)
+2. JPEG-koda enskilda frames
+3. `pipeline.process_frame()` → annoterat display + board-overlay
+4. Jämför tracker-längd med `prev_throw_count` för att detektera nya kast
+5. Uppdatera `state` med lock
+6. Pusha throw-events till `event_queue`
 
 **Kärnalgoritm** (`dartvision_score.py`)
-- `DartTrack`: EMA-smoothing alpha=0.4, `scored`-flagga
+- `DartTrack`: EMA-smoothing alpha=0.4, `scored`-flagga, `hits`/`age`-räknare
 - `DartTracker`: greedy nearest-neighbour matching, tröskel 18 mm, `MIN_HITS=3`, `MAX_AGE=8`
-- `score_from_mm(x_mm, y_mm)`: mm-koordinater → zon, poäng, multiplikator, sektor, radien, vinkel, is_edge
+- `DartVisionPipeline`: YOLO-inferens → tracker-uppdatering → homografi-transform → `score_from_mm()` → debounce
+- `score_from_mm(x_mm, y_mm)`: mm-koordinater → zon, poäng, multiplikator, sektor, radien, vinkel, `is_edge`
 - `BOARD_RADIUS_MAX_MM = 500`: homografi-valideringsgräns (förhöjd från 200 för att acceptera miss-kast utanför boardet)
-
-**Kalibrering** (`routes/calibration.py`)
-Tar 41 pixelkoordinater, kör `cv2.findHomography(..., cv2.RANSAC, 5.0)`, sparar JSON. Pipeline hot-reloadar utan omstart. Referensordning: Bull → 20 Doubles → 20 Triples.
 
 **Auth** (`routes/auth.py`)
 SQLite (`dartvision.db`). PBKDF2-HMAC-SHA256, 16-byte salt, 100k iterationer. Custom HMAC-tokens, 30 dagars giltighetstid — ingen extern JWT-lib.
@@ -141,15 +248,18 @@ SQLite (`dartvision.db`). PBKDF2-HMAC-SHA256, 16-byte salt, 100k iterationer. Cu
 - **Språk**: UI-text och kodkommentarer på svenska
 - **Färgtema**: `#0a0a10` bakgrund, `#EF4444` röd accent; per-läge: `#10B981` grön (MatchGame/121), `#8B5CF6` lila (ATC), `#F59E0B` orange (Tournament)
 - **Tailwind v4**: Enbart `@import "tailwindcss"` i `index.css` — ingen `tailwind.config.js`. Styling mestadels via `style={{}}`.
-- **React 19**: Enbart funktionella komponenter och hooks. Inga ref-mutationer under render.
-- **All scoring via kamera**: `ScoreEditor` och ⚙ Manuell finns enbart för att korrigera fel-detekteringar, inte som primär inmatning.
+- **React 19**: Enbart funktionella komponenter och hooks. Inga ref-mutationer under render — all state-uppdatering i WS-callbacks eller event handlers.
+- **All scoring via kamera**: `ScoreEditor` och ⚙ Manuell finns enbart för att korrigera fel-detekteringar.
+- **`CK`-tabell synkronisering**: Checkout-tabellen är hårdkodad i `MatchGame.jsx`, `Game121.jsx` och `dartBot.js` — uppdatera på alla tre ställen vid ändring.
 
 ---
 
 ## Viktiga mönster
 
-**Stale-closure-mönster för snabba WS-events**: När en callback tar emot snabba externa events och läser React-state, använd en `useRef` som synkroniseras i varje render. Se `cDartsRef` i `MatchGame.jsx` som kanoniskt exempel — utan det kan parallella `"throw"`-events se ett inaktuellt `cDarts`.
+**Stale-closure-mönster** (`cDartsRef` i MatchGame): När en callback tar emot snabba externa events (WS-throws) och läser React-state, använd `useRef` som uppdateras synkront i varje callback. `cDartsRef.current` är alltid aktuell; `cDarts` kan vara inaktuell fram till nästa render. Samma mönster krävs i alla komponenter med WS + rapid state reads.
 
-**Bot-timeout-mönster**: `botTimeoutRef = useRef(null)` håller pekare till botens `setTimeout`. `handleUndo` avbryter alltid timeoutet först. `botTrigger` (useState-räknare) ökas för att tvinga om bot-effekten när `cpIdx` inte ändras (t.ex. vid avbruten mitt-i-kast). Bot-effekten har guard: `if(cDartsRef.current.some(Boolean)) return` för att inte kasta om när pilar redan visas efter ångra.
+**Bot timeout-mönster**: Alla `setTimeout`-IDs samlas i en `timers[]`-array i bot-effekten och clearas i cleanup-funktionen. `botThrowing`-state guard blockar undo och knappar under hela botens tur. `botDartToSvg`-koordinater pre-genereras vid effektstart — inte vid varje timer-callback — för stabila positioner.
 
-**Port-hårdkodning**: Port 8000 är hårdkodad på tre ställen: `useDartVision.js`, `CalibrationPage.jsx`, `LiveScoring.jsx`. Ändra på alla tre vid portbyte.
+**Undo med bot-hoppning** (`handleUndo` i MatchGame): Loop baklänges i history, hoppa över bot-rundor (applicera undo som sidoeffekt), stanna vid första human-runda, sätt `setCpIdx(humanIndex)`. Återställ `cDarts = lr.darts` (inte `[null,null,null]`) för att möjliggöra pil-för-pil-undo av senaste rundan.
+
+**Port-hårdkodning**: Port 8000 finns på tre ställen: `useDartVision.js`, `CalibrationPage.jsx`, `LiveScoring.jsx`. Ändra på alla tre vid portbyte.
