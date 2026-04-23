@@ -143,8 +143,10 @@ export default function MatchGame({ navigate, matchConfig, isTournament = false,
   const confirmingRef=useRef(false);
   const cDartsRef=useRef([null,null,null]);
   const botTimeoutRef=useRef(null);
+  const humanSwitchRef=useRef(null);
   const [botThrowing,setBotThrowing]=useState(false);  // true under hela botens tur
   const [botIndicator,setBotIndicator]=useState(false); // true medan bot kastar (döljs under 3s-paus)
+  const [roundEnded,setRoundEnded]=useState(false);    // true under 3s-paus efter mänsklig runda
   const [winner,setWinner]=useState(null);
   const [bust,setBust]=useState(null);
   const [finalLegsWon, setFinalLegsWon] = useState(null);
@@ -257,6 +259,7 @@ export default function MatchGame({ navigate, matchConfig, isTournament = false,
   },[isBot, cpIdx]);
 
   const applyDart=(di)=>{
+    if(roundEnded)return;
     const cur=cDartsRef.current;
     const thrownNow=cur.filter(Boolean).length;
     if(thrownNow>=3)return;
@@ -267,24 +270,40 @@ export default function MatchGame({ navigate, matchConfig, isTournament = false,
 
     if(ns===0&&di.multiplier===2){
       setCDarts(nd);
-      setTotThrown(p=>{const n=[...p];n[cpIdx]+=nt;return n;});
-      setRndCount(p=>{const n=[...p];n[cpIdx]++;return n;});
       const nl=[...legsWon];nl[cpIdx]++;
       if(nl[cpIdx]>=legsToWin){
+        setTotThrown(p=>{const n=[...p];n[cpIdx]+=nt;return n;});
+        setRndCount(p=>{const n=[...p];n[cpIdx]++;return n;});
         setScores(p=>{const n=[...p];n[cpIdx]=0;return n;});
         setLegsWon(nl);setWinner(cp);setGameOver(true);
         setFinalLegsWon(nl);
         return;
       }
-      setHistory(p=>[...p,{pi:cpIdx,darts:nd,sb:cs,bust:false}]);
-      setLegsWon(nl);setScores(players.map(()=>startingScore));setCDarts([null,null,null]);setCpIdx(0);return;
+      setRoundEnded(true);
+      humanSwitchRef.current=setTimeout(()=>{
+        humanSwitchRef.current=null;
+        setHistory(p=>[...p,{pi:cpIdx,darts:nd,sb:cs,bust:false}]);
+        setTotThrown(p=>{const n=[...p];n[cpIdx]+=nt;return n;});
+        setRndCount(p=>{const n=[...p];n[cpIdx]++;return n;});
+        setLegsWon(nl);setScores(players.map(()=>startingScore));
+        cDartsRef.current=[null,null,null];setCDarts([null,null,null]);setCpIdx(0);
+        setRoundEnded(false);
+      },3000);
+      return;
     }
     if(ns<=0||ns===1){
       setBust(ns<0?"Bust! Under noll":ns===1?"Bust! Kvar: 1":"Bust! Måste sluta på dubbel");
       setTimeout(()=>setBust(null),2500);
-      setHistory(p=>[...p,{pi:cpIdx,darts:nd,sb:cs,bust:true}]);
-      setRndCount(p=>{const n=[...p];n[cpIdx]++;return n;});
-      setCDarts([null,null,null]);setCpIdx(p=>(p+1)%players.length);return;
+      cDartsRef.current=nd;setCDarts(nd);
+      setRoundEnded(true);
+      humanSwitchRef.current=setTimeout(()=>{
+        humanSwitchRef.current=null;
+        setHistory(p=>[...p,{pi:cpIdx,darts:nd,sb:cs,bust:true}]);
+        setRndCount(p=>{const n=[...p];n[cpIdx]++;return n;});
+        cDartsRef.current=[null,null,null];setCDarts([null,null,null]);
+        setCpIdx(p=>(p+1)%players.length);setRoundEnded(false);
+      },3000);
+      return;
     }
 
     setCDarts(nd);
@@ -295,12 +314,17 @@ export default function MatchGame({ navigate, matchConfig, isTournament = false,
     if(confirmingRef.current)return;
     confirmingRef.current=true;
     setTimeout(()=>{confirmingRef.current=false;},200);
-    const ds=d||cDarts;const t=ds.reduce((s,x)=>s+(x?x.value:0),0);
-    setHistory(p=>[...p,{pi:cpIdx,darts:[...ds],sb:cs,bust:false}]);
-    setTotThrown(p=>{const n=[...p];n[cpIdx]+=t;return n;});
-    setRndCount(p=>{const n=[...p];n[cpIdx]++;return n;});
-    setScores(p=>{const n=[...p];n[cpIdx]-=t;return n;});
-    setCDarts([null,null,null]);setCpIdx(p=>(p+1)%players.length);
+    const ds=d||cDartsRef.current;const t=ds.reduce((s,x)=>s+(x?x.value:0),0);
+    setRoundEnded(true);
+    humanSwitchRef.current=setTimeout(()=>{
+      humanSwitchRef.current=null;
+      setHistory(p=>[...p,{pi:cpIdx,darts:[...ds],sb:cs,bust:false}]);
+      setTotThrown(p=>{const n=[...p];n[cpIdx]+=t;return n;});
+      setRndCount(p=>{const n=[...p];n[cpIdx]++;return n;});
+      setScores(p=>{const n=[...p];n[cpIdx]-=t;return n;});
+      cDartsRef.current=[null,null,null];setCDarts([null,null,null]);
+      setCpIdx(p=>(p+1)%players.length);setRoundEnded(false);
+    },3000);
   };
 
   /* ===== LIVE AUTO-SCORING (inaktiverad under botens tur) ===== */
@@ -314,7 +338,7 @@ export default function MatchGame({ navigate, matchConfig, isTournament = false,
 
   const { connected, darts, resetBackend } = useDartVision({
     onThrow: handleLiveThrow,
-    enabled: !gameOver && !isBot,
+    enabled: !gameOver && !isBot && !roundEnded,
   });
 
   /* Reset backend vid mount */
@@ -324,6 +348,15 @@ export default function MatchGame({ navigate, matchConfig, isTournament = false,
 
   const handleUndo=()=>{
     if(isBot||botThrowing)return; // Ångra är inaktiv under botens tur
+
+    if(roundEnded){
+      if(humanSwitchRef.current){clearTimeout(humanSwitchRef.current);humanSwitchRef.current=null;}
+      setRoundEnded(false);
+      const cur=cDartsRef.current;
+      const lastIdx=cur.reduce((l,d,i)=>(d?i:l),-1);
+      if(lastIdx>=0){const n=[...cur];n[lastIdx]=null;cDartsRef.current=n;setCDarts(n);}
+      return;
+    }
 
     // Använd ref för att undvika stale closure om en pil just registrerats
     const curDarts=cDartsRef.current;
@@ -476,14 +509,14 @@ export default function MatchGame({ navigate, matchConfig, isTournament = false,
                 onMouseEnter={(e)=>{if(canUndo){e.currentTarget.style.color="#EF4444";e.currentTarget.style.borderColor="rgba(239,68,68,0.4)";}}}
                 onMouseLeave={(e)=>{if(canUndo){e.currentTarget.style.color="rgba(255,255,255,0.5)";e.currentTarget.style.borderColor="rgba(255,255,255,0.1)";}}}> ↩ Ångra
               </button>
-              <button onClick={()=>setManualEntry(true)} disabled={thrown>=3||botThrowing||isBot}
+              <button onClick={()=>setManualEntry(true)} disabled={thrown>=3||botThrowing||isBot||roundEnded}
                 className="px-5 py-2.5 rounded-xl text-sm font-semibold uppercase tracking-widest transition-all duration-200"
                 style={{background:thrown<3&&!botThrowing&&!isBot?"rgba(255,255,255,0.05)":"rgba(255,255,255,0.02)",color:thrown<3&&!botThrowing&&!isBot?"rgba(255,255,255,0.5)":"rgba(255,255,255,0.15)",border:thrown<3&&!botThrowing&&!isBot?"1px solid rgba(255,255,255,0.1)":"1px solid rgba(255,255,255,0.04)",cursor:thrown<3&&!botThrowing&&!isBot?"pointer":"default"}}
                 onMouseEnter={(e)=>{if(thrown<3&&!botThrowing&&!isBot)e.currentTarget.style.color="rgba(255,255,255,0.8)";}}
                 onMouseLeave={(e)=>{if(thrown<3&&!botThrowing&&!isBot)e.currentTarget.style.color="rgba(255,255,255,0.5)";}}>
                 ⚙ Manuell
               </button>
-              {thrown<3&&!isBot&&!botThrowing&&(
+              {thrown<3&&!isBot&&!botThrowing&&!roundEnded&&(
                 <button onClick={()=>applyDart({zone:"Miss",value:0,label:"Miss",multiplier:0,number:0})}
                   className="px-5 py-2.5 rounded-xl text-sm font-semibold uppercase tracking-widest transition-all duration-200"
                   style={{background:"rgba(239,68,68,0.08)",color:"#EF4444",border:"1px solid rgba(239,68,68,0.25)"}}
@@ -491,7 +524,7 @@ export default function MatchGame({ navigate, matchConfig, isTournament = false,
                   onMouseLeave={(e)=>e.currentTarget.style.background="rgba(239,68,68,0.08)"}> Miss
                 </button>
               )}
-              {thrown>0&&!isBot&&!botThrowing&&(
+              {thrown>0&&!isBot&&!botThrowing&&!roundEnded&&(
                 <button onClick={()=>confirmRound(null)} className="px-6 py-2.5 rounded-xl text-sm font-semibold uppercase tracking-widest transition-all duration-200"
                   style={{background:"rgba(16,185,129,0.1)",color:"#10B981",border:"1px solid rgba(16,185,129,0.3)"}}
                   onMouseEnter={(e)=>e.currentTarget.style.background="rgba(16,185,129,0.2)"} onMouseLeave={(e)=>e.currentTarget.style.background="rgba(16,185,129,0.1)"}> Bekräfta runda
