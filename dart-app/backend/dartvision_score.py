@@ -68,11 +68,11 @@ TRACK_MAX_AGE = 8              # frames utan detektion innan track dör
 TRACK_SMOOTH_ALPHA = 0.4       # EMA-faktor (lägre = mer smoothing)
 
 # Debounce
-STABLE_FRAMES_REQUIRED = 4    # antal frames med samma dart-antal innan scoring
+STABLE_FRAMES_REQUIRED = 2    # antal frames med samma dart-antal innan scoring
 ZERO_FRAMES_REQUIRED = 5      # antal frames med 0 darts innan "ny runda"
 
 # Confidence
-CONF_SCORE_MIN = 0.20         # under detta → visas men scoreas inte
+CONF_SCORE_MIN = 0.15         # under detta → visas men scoreas inte
 CONF_DISPLAY_MIN = 0.10       # under detta → visas inte alls
 
 # Färger
