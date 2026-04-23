@@ -61,6 +61,8 @@ BOARD_RADIUS_MAX_MM = 500.0    # homografi-validering: max avstånd från centru
 # Tracker
 TRACK_MATCH_MM = 18.0          # max avstånd för att matcha detektion → oscorad track
 SCORED_MATCH_MM = 5.0          # max avstånd för att matcha detektion → redan scorad track
+SCORED_DEDUP_MM = 35.0         # blockera ny track inom denna radie direkt efter ett kast
+SCORED_DEDUP_FRAMES = 15       # hur länge dedupen håller (~500 ms vid 30 fps)
 TRACK_MIN_HITS = 3             # frames en pil måste synas innan den räknas
 TRACK_MAX_AGE = 8              # frames utan detektion innan track dör
 TRACK_SMOOTH_ALPHA = 0.4       # EMA-faktor (lägre = mer smoothing)
@@ -477,6 +479,8 @@ class DartVisionPipeline:
         self.stable_frames = 0
         self.zero_frames = 0
 
+        self.scored_events = []  # [[x_mm, y_mm, frames_left], ...]
+
         self.debug_mode = False
         self.frame_num = 0
 
@@ -641,6 +645,9 @@ class DartVisionPipeline:
         3. Registrera bara tracks med conf >= CONF_SCORE_MIN som inte redan scorats
         4. Kräv ZERO_FRAMES_REQUIRED med 0 tracks för ny runda
         """
+        # Minska räknare för nyliga scorings, ta bort utgångna
+        self.scored_events = [[x, y, f - 1] for x, y, f in self.scored_events if f > 1]
+
         current_count = len(confirmed_tracks)
 
         # ---- Stabilitetskontroll ----
@@ -654,6 +661,7 @@ class DartVisionPipeline:
         if current_count == 0:
             self.zero_frames += 1
             if self.zero_frames >= ZERO_FRAMES_REQUIRED and self.prev_confirmed_count > 0:
+                self.scored_events.clear()
                 self.tracker.clear()
                 self.prev_confirmed_count = 0
                 self.stable_count = 0
@@ -683,10 +691,20 @@ class DartVisionPipeline:
                 if track.conf < CONF_SCORE_MIN:
                     print(f"    → id={track.id} HOPPAS ÖVER (conf={track.conf:.2f} < {CONF_SCORE_MIN})")
                     continue
+                # Temporal dedup: blockera duplikat (kors-kamera eller YOLO multi-bbox)
+                # som bekräftas kort efter ett redan registrerat kast på samma plats
+                pos = (track.smooth_x, track.smooth_y)
+                if any(dist_mm(pos, (x, y)) < SCORED_DEDUP_MM
+                       for x, y, _ in self.scored_events):
+                    print(f"    → id={track.id} TEMP-DEDUP — nära nyligen registrerad position")
+                    track.scored = True  # markera så att tracken inte testas igen
+                    continue
                 zone, score, mult, sector, r_mm, angle, is_edge = \
                     score_from_mm(track.smooth_x, track.smooth_y)
                 self.scoreboard.add_throw(zone, score, is_edge, track.cam)
                 track.scored = True
+                # Registrera position med tidsstämpel — blockerar duplikat i SCORED_DEDUP_FRAMES frames
+                self.scored_events.append([track.smooth_x, track.smooth_y, SCORED_DEDUP_FRAMES])
                 print(f"  KAST: {zone} = {score} ({track.cam}) "
                       f"[r={r_mm:.0f}mm, conf={track.conf:.2f}, hits={track.hits}]")
 
@@ -754,7 +772,8 @@ def main():
     print(f"\nDartVision v3 (optimerad)")
     print(f"  Feed:    {f_w}x{f_h} @ {fps:.0f}fps")
     print(f"  Conf:    display>{CONF_DISPLAY_MIN}  score>{CONF_SCORE_MIN}")
-    print(f"  Dedup:   same-cam={DEDUP_SAME_CAM_MM}mm  cross-cam={DEDUP_CROSS_CAM_MM}mm")
+    print(f"  Dedup:   same-cam={DEDUP_SAME_CAM_MM}mm  cross-cam={DEDUP_CROSS_CAM_MM}mm  "
+          f"temporal={SCORED_DEDUP_MM}mm/{SCORED_DEDUP_FRAMES}f")
     print(f"  Tracker: match={TRACK_MATCH_MM}mm (scorad:{SCORED_MATCH_MM}mm)  "
           f"min_hits={TRACK_MIN_HITS}  max_age={TRACK_MAX_AGE}  alpha={TRACK_SMOOTH_ALPHA}")
     print(f"  Stabil:  {STABLE_FRAMES_REQUIRED} frames  Zero: {ZERO_FRAMES_REQUIRED} frames")
