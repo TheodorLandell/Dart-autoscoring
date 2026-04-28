@@ -18,3 +18,5 @@ DEFAULT_PORT = 8000
 DEFAULT_CONF = 0.10
 DEFAULT_TIP_OFFSET = 0.3
 DEFAULT_MODEL = "best.pt"
+DEFAULT_CAMERA = 0     # primär kamera (vänster)
+DEFAULT_CAMERA2 = 2    # sekundär kamera (höger)

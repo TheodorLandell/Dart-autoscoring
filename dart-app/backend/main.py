@@ -29,7 +29,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
-from config import DEFAULT_PORT, DEFAULT_CONF, DEFAULT_TIP_OFFSET, DEFAULT_MODEL
+from config import DEFAULT_PORT, DEFAULT_CONF, DEFAULT_TIP_OFFSET, DEFAULT_MODEL, DEFAULT_CAMERA, DEFAULT_CAMERA2
 from state import state
 from routes import register_routes
 from pipeline_thread import run_pipeline
@@ -69,10 +69,10 @@ def _camera_arg(value: str):
 
 def main():
     parser = argparse.ArgumentParser(description="DartVision Server")
-    parser.add_argument("--camera", type=_camera_arg, default=0,
+    parser.add_argument("--camera", type=_camera_arg, default=DEFAULT_CAMERA,
                         help="Primär kamera: index (0) eller URL (http://...)")
-    parser.add_argument("--camera2", type=_camera_arg, default=None,
-                        help="Sekundär kamera: index eller URL (None = dual-feed)")
+    parser.add_argument("--camera2", type=_camera_arg, default=DEFAULT_CAMERA2,
+                        help="Sekundär kamera: index eller URL (None = inaktiverad)")
     parser.add_argument("--model", type=str, default=DEFAULT_MODEL,
                         help="Sökväg till YOLO-modell (default: best.pt)")
     parser.add_argument("--calib_left", type=str, default=None,
