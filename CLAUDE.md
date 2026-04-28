@@ -52,6 +52,10 @@ GET  /api/status                     Camera status, FPS, calibration info
 POST /api/auth/register              Register new user
 POST /api/auth/login                 Login, returns token + user
 GET  /api/auth/me                    Validate token, returns user object
+POST /api/user/match                 Save match result + throws for logged-in user
+GET  /api/user/matches               Recent matches for logged-in user (limit param)
+GET  /api/user/heatmap               Throw positions for heatmap (mode=all|501|301|121|atc)
+GET  /api/user/stats                 Aggregated stats for logged-in user
 ```
 
 ---
@@ -62,7 +66,7 @@ GET  /api/auth/me                    Validate token, returns user object
 
 **Navigation**: No React Router. `App.jsx` holds all app-level state (`user`, `matchConfig`, `tournamentConfig`, `tournamentMatchId`) and renders the active page via a `navigate(page, data)` switch. Session is auto-restored from `dart_token` in localStorage with background validation against `/api/auth/me`. To add a page, add a case to the switch and a conditional render in `App.jsx`.
 
-**Live scoring**: `useDartVision.js` manages the WebSocket lifecycle against `ws://localhost:8000/ws/scoring`. It handles auto-reconnect with exponential backoff (max 15 s), distinguishes `"state"` (sync, contains `darts[]`) vs `"throw"` (new dart event, fires `onThrow` callback). `readyRef` is set `false` on reconnect; throw events are ignored for the first 500 ms after connecting. The `enabled` prop disables the WebSocket entirely when false (used during bot turns in MatchGame). Exposes `{ connected, darts, resetBackend }`. Backend port 8000 is hardcoded here and in `CalibrationPage.jsx` and `LiveScoring.jsx` — change in all three if you change the port.
+**Live scoring**: `useDartVision.js` manages the WebSocket lifecycle against `ws://localhost:8000/ws/scoring`. It handles auto-reconnect with exponential backoff (max 15 s), distinguishes `"state"` (sync, contains `darts[]` and `throws[]`) vs `"throw"` (new dart event, fires `onThrow` callback). `readyRef` is set `false` on reconnect; on the first `"state"` after connect `processedThrowCountRef` is synced to the current server throw count (so no old events replay). If throws arrived while WS was down, they are recovered from `state.throws[]` on the next state message. The `enabled` prop disables the WebSocket entirely when false (used during bot turns in MatchGame). Exposes `{ connected, darts, resetBackend }`. Backend port 8000 is hardcoded here and in `CalibrationPage.jsx` and `LiveScoring.jsx` — change in all three if you change the port.
 
 **Dart object shape** (WebSocket `"state"` message → `darts[]`, also sent on `"throw"`):
 ```js
@@ -116,7 +120,9 @@ GET  /api/auth/me                    Validate token, returns user object
 
 **Calibration** (`routes/calibration.py`): receives 41 pixel coordinates, runs `cv2.findHomography(..., cv2.RANSAC, 5.0)`, reports inliers/mean-error/max-error, saves matrix to JSON. Pipeline hot-reloads without restart.
 
-**Auth** (`routes/auth.py`): SQLite database (`dartvision.db`). Passwords hashed with PBKDF2-HMAC-SHA256 (16-byte salt, 100k iterations). Tokens are custom HMAC-based with 30-day expiry — no external JWT library.
+**Auth** (`routes/auth.py`): SQLite database (`dartvision.db`). Passwords hashed with PBKDF2-HMAC-SHA256 (16-byte salt, 100k iterations). Tokens are custom HMAC-based with 30-day expiry — no external JWT library. The `users` table includes aggregated stat columns (`matches_played`, `matches_won`, `highest_checkout`, `avg_score`, `best_leg`, `favorite_mode`) updated by `_update_user_stats()` after each saved match.
+
+**Stats** (`routes/stats.py`): Two tables — `throws` (per-dart: zone, score, x_mm, y_mm, mode) and `matches` (per-game: mode, result_str, won, checkout, darts_in_leg). Called from MatchGame, Game121, and AroundTheClock via `POST /api/user/match` at match/session end. `GET /api/user/heatmap` returns all throw positions filtered by mode for the heatmap canvas.
 
 **Geometry** (`utils/geometry.py`): `mm_to_svg(x_mm, y_mm)` maps board mm → 400×400 SVG coordinates; `generate_reference_points()` produces the 41 calibration reference points.
 
@@ -130,5 +136,7 @@ GET  /api/auth/me                    Validate token, returns user object
 - **React 19**: Functional components and hooks only. No ref mutations during render — all updates in effects or event callbacks.
 - **Scoring is camera-only**: `ScoreEditor` and **⚙ Manuell** exist only for correcting/supplementing misdetections, not as primary input.
 - **Stale closure pattern**: When a callback receives rapid-fire external events (WebSocket throws) and reads React state, use a `useRef` that is updated synchronously inside the callback. See `cDartsRef` in `MatchGame.jsx` as the canonical example.
-- **Bot timeout pattern**: Bot turns use `botTimeoutRef = useRef(null)` to hold the pending `setTimeout` ID. `handleUndo` cancels it first before doing anything else. `botTrigger` (a `useState` counter) is incremented to force the bot effect to re-run when `cpIdx` hasn't changed (e.g. after a mid-throw cancel). The bot effect guards with `if(cDartsRef.current.some(Boolean)) return` to avoid re-throwing when darts are already showing after an undo.
+- **Bot timeout pattern**: Bot turns use `botTimeoutRef = useRef(null)` to hold the pending `setTimeout` ID. `handleUndo` cancels it first before doing anything else. The bot effect guards with `if(cDartsRef.current.some(Boolean)) return` to avoid re-throwing when darts are already showing after an undo.
+- **WS reconnect recovery**: `processedThrowCountRef` in `useDartVision.js` tracks how many throws the frontend has processed. On reconnect the counter is synced to `state.throws.length` (no replay). If throws arrived while WS was down they are recovered from `state.throws[]` on the next state message. `resetBackend()` resets the counter to 0.
+- **Stats saving**: All game modes call `POST /api/user/match` at session end only when a `user` prop is present. Bot throws are excluded — only human throws are stored.
 - **Port hardcoding**: Backend port 8000 is hardcoded in `useDartVision.js`, `CalibrationPage.jsx`, and `LiveScoring.jsx`.

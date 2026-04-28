@@ -88,6 +88,7 @@ dart-app/
         ├── scoring.py          # WebSocket /ws/scoring + POST /api/reset
         ├── calibration.py      # GET/POST kalibrering och referenspunkter
         ├── auth.py             # Registrering, login, token-validering (SQLite)
+        ├── stats.py            # Kast- och matchstatistik per användare
         └── status.py           # GET /api/status (kamerastatus, FPS, kalib)
 ```
 
@@ -110,6 +111,10 @@ GET  /api/status                     Kamerastatus, FPS, kalibreringsstatus
 POST /api/auth/register              Registrera ny användare
 POST /api/auth/login                 Logga in, returnerar token + user
 GET  /api/auth/me                    Validera token, returnerar user-objekt
+POST /api/user/match                 Spara matchresultat + kast för inloggad användare
+GET  /api/user/matches               Senaste matcher för inloggad användare (limit-param)
+GET  /api/user/heatmap               Kastpositioner för heatmap (mode=all|501|301|121|atc)
+GET  /api/user/stats                 Aggregerad statistik för inloggad användare
 ```
 
 ---
@@ -124,8 +129,9 @@ All navigation sköts av `navigate(page, data)` i `App.jsx`. `page`-state-variab
 **Live scoring via WebSocket-hook**
 `useDartVision.js` hanterar hela WebSocket-livscykeln mot `ws://localhost:8000/ws/scoring`:
 - Automatisk återanslutning med exponentiell backoff (max 15 s)
-- `"state"`-meddelanden (synk, innehåller `darts[]`) vs `"throw"` (nytt kast, triggar `onThrow`-callback)
-- `readyRef.current` sätts `false` vid reconnect; ignorerar throw-events de första 500 ms efter anslutning
+- `"state"`-meddelanden (synk, innehåller `darts[]` och `throws[]`) vs `"throw"` (nytt kast, triggar `onThrow`-callback)
+- `readyRef.current` sätts `false` vid reconnect; vid första `"state"` efter anslutning synkas `processedThrowCountRef` till serverns `throws.length` utan att trigga `onThrow` (inga gamla events spelas upp)
+- Om kast registrerades medan WS var nere återhämtas de från `state.throws[]` vid nästa state-meddelande
 - `enabled`-prop: när `false` kopplas WS inte upp alls (används under botens tur i MatchGame)
 - Returnerar `{ connected, darts, resetBackend }`
 
@@ -239,7 +245,10 @@ Oändlig loop:
 - `BOARD_RADIUS_MAX_MM = 500`: homografi-valideringsgräns (förhöjd från 200 för att acceptera miss-kast utanför boardet)
 
 **Auth** (`routes/auth.py`)
-SQLite (`dartvision.db`). PBKDF2-HMAC-SHA256, 16-byte salt, 100k iterationer. Custom HMAC-tokens, 30 dagars giltighetstid — ingen extern JWT-lib.
+SQLite (`dartvision.db`). PBKDF2-HMAC-SHA256, 16-byte salt, 100k iterationer. Custom HMAC-tokens, 30 dagars giltighetstid — ingen extern JWT-lib. `users`-tabellen innehåller aggregerade stat-kolumner (`matches_played`, `matches_won`, `highest_checkout`, `avg_score`, `best_leg`, `favorite_mode`) som uppdateras av `_update_user_stats()` efter varje sparad match.
+
+**Stats** (`routes/stats.py`)
+Två tabeller: `throws` (per pil: zone, score, x_mm, y_mm, mode) och `matches` (per match: mode, result_str, won, checkout, darts_in_leg). Anropas från MatchGame, Game121 och AroundTheClock via `POST /api/user/match` vid matchslut. Bara mänskliga spelarens kast sparas — bot-kast exkluderas. `GET /api/user/heatmap` returnerar kastpositioner filtrerade på mode för heatmap-canvas.
 
 ---
 
@@ -261,5 +270,9 @@ SQLite (`dartvision.db`). PBKDF2-HMAC-SHA256, 16-byte salt, 100k iterationer. Cu
 **Bot timeout-mönster**: Alla `setTimeout`-IDs samlas i en `timers[]`-array i bot-effekten och clearas i cleanup-funktionen. `botThrowing`-state guard blockar undo och knappar under hela botens tur. `botDartToSvg`-koordinater pre-genereras vid effektstart — inte vid varje timer-callback — för stabila positioner.
 
 **Undo med bot-hoppning** (`handleUndo` i MatchGame): Loop baklänges i history, hoppa över bot-rundor (applicera undo som sidoeffekt), stanna vid första human-runda, sätt `setCpIdx(humanIndex)`. Återställ `cDarts = lr.darts` (inte `[null,null,null]`) för att möjliggöra pil-för-pil-undo av senaste rundan.
+
+**WS reconnect-recovery** (`processedThrowCountRef` i `useDartVision.js`): Räknare som spårar hur många kast frontend bearbetat. Vid reconnect synkas till `state.throws.length` utan att trigga `onThrow`. Kast som registrerades medan WS var nere återhämtas från `state.throws[]` vid nästa state-meddelande. `resetBackend()` nollställer räknaren.
+
+**Stats-sparning**: Alla spellägen anropar `POST /api/user/match` vid sessionens slut — men bara om `user`-prop är satt (inloggad). Bara mänskliga spelarens kast inkluderas (bot-kast exkluderas). `saveMatchStats(winnerPlayer, finalLegsArr, finalNd, finalCpIdx)` i MatchGame kallas vid match-vinst oavsett om human eller bot vann.
 
 **Port-hårdkodning**: Port 8000 finns på tre ställen: `useDartVision.js`, `CalibrationPage.jsx`, `LiveScoring.jsx`. Ändra på alla tre vid portbyte.
