@@ -8,6 +8,7 @@ from .calibration import router as calibration_router
 from .scoring import router as scoring_router
 from .status import router as status_router
 from .auth import router as auth_router
+from .stats import router as stats_router
 
 
 def register_routes(app):
@@ -17,3 +18,4 @@ def register_routes(app):
     app.include_router(scoring_router)       # WS har ingen prefix
     app.include_router(status_router, prefix="/api")
     app.include_router(auth_router, prefix="/api")
+    app.include_router(stats_router, prefix="/api")

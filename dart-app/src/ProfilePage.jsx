@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 /*
   ┌─────────────────────────────────────────────────────────────┐
@@ -95,16 +95,29 @@ function MatchHistoryRow({ match, index }) {
   );
 }
 
-/* Mock match history — i produktion: GET /api/user/matches?limit=5 */
-const MOCK_MATCHES = [
-  { id: 1, mode: "Match 501", result: "Vinst", score: "3-1", date: "2026-03-25" },
-  { id: 2, mode: "Match 501", result: "Förlust", score: "1-3", date: "2026-03-24" },
-  { id: 3, mode: "121", result: "Vinst", score: "Nådde 142", date: "2026-03-24" },
-  { id: 4, mode: "Match 301", result: "Vinst", score: "3-2", date: "2026-03-23" },
-  { id: 5, mode: "Around the Clock", result: "Klar", score: "87% accuracy", date: "2026-03-22" },
-];
-
 export default function ProfilePage({ navigate, user, setUser }) {
+  const [matches, setMatches] = useState([]);
+
+  useEffect(() => {
+    if (!user) return;
+    const token = localStorage.getItem("dart_token");
+    if (!token) return;
+    // Hämta senaste matcher
+    fetch("http://localhost:8000/api/user/matches?limit=5", {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(r => r.json())
+      .then(data => { if (data.matches) setMatches(data.matches); })
+      .catch(() => {});
+    // Hämta uppdaterad statistik
+    fetch("http://localhost:8000/api/user/stats", {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(r => r.json())
+      .then(data => { if (data.user) setUser(data.user); })
+      .catch(() => {});
+  }, [user?.id]);
+
   if (!user) {
     navigate("login");
     return null;
@@ -225,9 +238,13 @@ export default function ProfilePage({ navigate, user, setUser }) {
               </div>
 
               <div className="flex flex-col gap-2">
-                {MOCK_MATCHES.map((match, i) => (
-                  <MatchHistoryRow key={match.id} match={match} index={i} />
-                ))}
+                {matches.length === 0 ? (
+                  <p className="text-sm text-center" style={{ color: "rgba(255,255,255,0.3)" }}>Inga matcher sparade ännu</p>
+                ) : (
+                  matches.map((match, i) => (
+                    <MatchHistoryRow key={match.id} match={match} index={i} />
+                  ))
+                )}
               </div>
             </>
           )}

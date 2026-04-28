@@ -28,6 +28,7 @@ import cv2
 import numpy as np
 import json
 import math
+import time
 import argparse
 from pathlib import Path
 from collections import deque
@@ -55,14 +56,14 @@ WIRE_TOLERANCE_MM = 2.0
 # TUNING-PARAMETRAR (v3)
 # ============================================================
 DEDUP_SAME_CAM_MM = 8.0        # samma kamera: max avstånd för att merga två bbox till samma pil
-DEDUP_CROSS_CAM_MM = 20.0      # kors-kamera: max avstånd för att merga L- och R-detektion av samma pil
+DEDUP_CROSS_CAM_MM = 30.0      # kors-kamera: max avstånd för att merga L- och R-detektion av samma pil
 BOARD_RADIUS_MAX_MM = 500.0    # homografi-validering: max avstånd från centrum (utökad för foam-träffar)
 
 # Tracker
 TRACK_MATCH_MM = 18.0          # max avstånd för att matcha detektion → oscorad track
 SCORED_MATCH_MM = 5.0          # max avstånd för att matcha detektion → redan scorad track
 SCORED_DEDUP_MM = 35.0         # blockera ny track inom denna radie direkt efter ett kast
-SCORED_DEDUP_SECS = 0.5        # hur länge dedupen håller (sekunder, fps-oberoende)
+SCORED_DEDUP_SECS = 3.0        # hur länge dedupen håller (sekunder, fps-oberoende)
 TRACK_MIN_HITS = 3             # frames en pil måste synas innan den räknas
 TRACK_MAX_AGE = 8              # frames utan detektion innan track dör
 TRACK_SMOOTH_ALPHA = 0.4       # EMA-faktor (lägre = mer smoothing)
@@ -342,8 +343,8 @@ class ScoreBoard:
         self.throws = []
         self.total = 0
 
-    def add_throw(self, zone, score, is_edge, cam=""):
-        self.throws.append((zone, score, is_edge, cam))
+    def add_throw(self, zone, score, is_edge, cam="", x_mm=0.0, y_mm=0.0):
+        self.throws.append((zone, score, is_edge, cam, x_mm, y_mm))
         self.total += score
 
     def draw(self, width=350, height=480):
@@ -360,7 +361,7 @@ class ScoreBoard:
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, COL_GRAY, 1)
 
         y = 150
-        for i, (zone, score, is_edge, cam) in enumerate(reversed(self.throws[-10:])):
+        for i, (zone, score, is_edge, cam, x_mm, y_mm) in enumerate(reversed(self.throws[-10:])):
             edge_str = " ~" if is_edge else ""
             color = COL_YELLOW if is_edge else COL_GREEN
             if score == 0:
@@ -685,6 +686,9 @@ class DartVisionPipeline:
                       f"pos=({track.smooth_x:.1f},{track.smooth_y:.1f})mm "
                       f"conf={track.conf:.2f} scored={track.scored}")
 
+            cycle_new = [t for t in confirmed_tracks
+                         if not t.scored and t.conf >= CONF_SCORE_MIN]
+
             for track in confirmed_tracks:
                 if track.scored:
                     continue
@@ -701,7 +705,18 @@ class DartVisionPipeline:
                     continue
                 zone, score, mult, sector, r_mm, angle, is_edge = \
                     score_from_mm(track.smooth_x, track.smooth_y)
-                self.scoreboard.add_throw(zone, score, is_edge, track.cam)
+                # MISS-suppression: om annan kamera har en giltig träff i denna cykel → undertryck
+                if zone == "MISS":
+                    other_valid = [
+                        score_from_mm(t.smooth_x, t.smooth_y)[0]
+                        for t in cycle_new
+                        if t is not track and t.cam != track.cam and not t.scored
+                    ]
+                    if any(z != "MISS" for z in other_valid):
+                        track.scored = True
+                        print(f"    → id={track.id} MISS UNDERTRYCKT (annan kamera: {other_valid})")
+                        continue
+                self.scoreboard.add_throw(zone, score, is_edge, track.cam, track.smooth_x, track.smooth_y)
                 track.scored = True
                 self.scored_events.append([track.smooth_x, track.smooth_y, time.time() + SCORED_DEDUP_SECS])
                 print(f"  KAST: {zone} = {score} ({track.cam}) "

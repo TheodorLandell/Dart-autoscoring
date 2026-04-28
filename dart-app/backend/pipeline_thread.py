@@ -133,13 +133,15 @@ def run_pipeline(
         # Nya kast-events (för WebSocket push)
         current_throws = pipeline.scoreboard.throws
         new_events = []
-        for zone, score, is_edge, cam in current_throws[prev_throw_count:]:
+        for zone, score, is_edge, cam, x_mm, y_mm in current_throws[prev_throw_count:]:
             new_events.append({
                 "type": "throw",
                 "zone": str(zone),
                 "score": int(score),
                 "is_edge": bool(is_edge),
                 "cam": str(cam) if cam is not None else None,
+                "x_mm": float(round(float(x_mm), 1)),
+                "y_mm": float(round(float(y_mm), 1)),
                 "total": int(pipeline.scoreboard.total),
                 "timestamp": float(time.time()),
             })
@@ -155,8 +157,10 @@ def run_pipeline(
 
         # Platta kast-listan
         throws_list = [
-            {"zone": str(z), "score": int(s), "is_edge": bool(e), "cam": str(c) if c is not None else None}
-            for z, s, e, c in current_throws
+            {"zone": str(z), "score": int(s), "is_edge": bool(e),
+             "cam": str(c) if c is not None else None,
+             "x_mm": float(x), "y_mm": float(y)}
+            for z, s, e, c, x, y in current_throws
         ]
 
         # Uppdatera delat state (thread-safe)

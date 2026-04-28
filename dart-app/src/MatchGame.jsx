@@ -125,7 +125,7 @@ function DartSlot({index,dart,isCurrent,onEdit}){
 }
 
 /* ============ MAIN — AUTO-SCORING ONLY ============ */
-export default function MatchGame({ navigate, matchConfig, isTournament = false, onTournamentMatchComplete = null }) {
+export default function MatchGame({ navigate, matchConfig, isTournament = false, onTournamentMatchComplete = null, user = null }) {
   const{players,startingScore,legs:totalLegs,format}=matchConfig;
   const legsToWin=format==="best-of"?Math.ceil(totalLegs/2):totalLegs;
   const PC=["#EF4444","#10B981","#8B5CF6","#F59E0B","#60A5FA","#EC4899","#14B8A6","#F97316"];
@@ -150,6 +150,11 @@ export default function MatchGame({ navigate, matchConfig, isTournament = false,
   const [winner,setWinner]=useState(null);
   const [bust,setBust]=useState(null);
   const [finalLegsWon, setFinalLegsWon] = useState(null);
+
+  // Stats-tracking för att spara matchresultat
+  const legDartsRef = useRef(players.map(() => 0));
+  const bestLegRef = useRef(players.map(() => 0));
+  const matchCheckoutRef = useRef(0);
 
   const cp=players[cpIdx];
   const cs=scores[cpIdx];
@@ -227,6 +232,7 @@ export default function MatchGame({ navigate, matchConfig, isTournament = false,
         if(nl[cpIdx]>=legsToWin){
           setScores(p=>{const n=[...p];n[cpIdx]=0;return n;});
           setLegsWon(nl);setWinner(cp);setGameOver(true);setFinalLegsWon(nl);
+          saveMatchStats(cp,nl,nd,cpIdx);
         } else {
           setHistory(p=>[...p,{pi:cpIdx,darts:nd,sb:cs,bust:false}]);
           setLegsWon(nl);setScores(players.map(()=>startingScore));
@@ -258,6 +264,42 @@ export default function MatchGame({ navigate, matchConfig, isTournament = false,
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[isBot, cpIdx]);
 
+  const saveMatchStats = (winnerPlayer, finalLegsArr, finalNd, finalCpIdx) => {
+    if (!user) return;
+    const humanIdx = players.findIndex(p => p.type !== "bot");
+    if (humanIdx < 0) return;
+    const won = finalLegsArr[humanIdx] >= legsToWin;
+    const histThrows = history
+      .filter(h => h.pi === humanIdx)
+      .flatMap(h => (h.darts || []).filter(Boolean).map(d => ({
+        zone: d.zone || d.label || "Miss",
+        score: d.value ?? 0,
+        x_mm: d.x_mm ?? 0,
+        y_mm: d.y_mm ?? 0,
+      })));
+    const curThrows = finalCpIdx === humanIdx
+      ? (finalNd || []).filter(Boolean).map(d => ({
+          zone: d.zone || d.label || "Miss",
+          score: d.value ?? 0,
+          x_mm: d.x_mm ?? 0,
+          y_mm: d.y_mm ?? 0,
+        }))
+      : [];
+    const token = localStorage.getItem("dart_token");
+    fetch("http://localhost:8000/api/user/match", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+      body: JSON.stringify({
+        mode: String(startingScore),
+        won,
+        result_str: finalLegsArr.join("-"),
+        checkout: won ? matchCheckoutRef.current : 0,
+        darts_in_leg: bestLegRef.current[humanIdx] || 0,
+        throws: [...histThrows, ...curThrows],
+      }),
+    }).catch(err => console.error("Stats save error:", err));
+  };
+
   const applyDart=(di)=>{
     if(roundEnded)return;
     const cur=cDartsRef.current;
@@ -271,14 +313,20 @@ export default function MatchGame({ navigate, matchConfig, isTournament = false,
     if(ns===0&&di.multiplier===2){
       setCDarts(nd);
       const nl=[...legsWon];nl[cpIdx]++;
+      const dartsInThisLeg=legDartsRef.current[cpIdx]+nd.filter(Boolean).length;
+      if(bestLegRef.current[cpIdx]===0||dartsInThisLeg<bestLegRef.current[cpIdx])bestLegRef.current[cpIdx]=dartsInThisLeg;
+      matchCheckoutRef.current=Math.max(matchCheckoutRef.current,cs);
       if(nl[cpIdx]>=legsToWin){
+        legDartsRef.current[cpIdx]=0;
         setTotThrown(p=>{const n=[...p];n[cpIdx]+=nt;return n;});
         setRndCount(p=>{const n=[...p];n[cpIdx]++;return n;});
         setScores(p=>{const n=[...p];n[cpIdx]=0;return n;});
         setLegsWon(nl);setWinner(cp);setGameOver(true);
         setFinalLegsWon(nl);
+        saveMatchStats(cp,nl,nd,cpIdx);
         return;
       }
+      legDartsRef.current[cpIdx]=0;
       setRoundEnded(true);
       humanSwitchRef.current=setTimeout(()=>{
         humanSwitchRef.current=null;
@@ -295,11 +343,13 @@ export default function MatchGame({ navigate, matchConfig, isTournament = false,
       setBust(ns<0?"Bust! Under noll":ns===1?"Bust! Kvar: 1":"Bust! Måste sluta på dubbel");
       setTimeout(()=>setBust(null),2500);
       cDartsRef.current=nd;setCDarts(nd);
+      const bustCpIdx=cpIdx;const bustNd=nd;
       setRoundEnded(true);
       humanSwitchRef.current=setTimeout(()=>{
         humanSwitchRef.current=null;
-        setHistory(p=>[...p,{pi:cpIdx,darts:nd,sb:cs,bust:true}]);
-        setRndCount(p=>{const n=[...p];n[cpIdx]++;return n;});
+        legDartsRef.current[bustCpIdx]+=bustNd.filter(Boolean).length;
+        setHistory(p=>[...p,{pi:bustCpIdx,darts:bustNd,sb:cs,bust:true}]);
+        setRndCount(p=>{const n=[...p];n[bustCpIdx]++;return n;});
         cDartsRef.current=[null,null,null];setCDarts([null,null,null]);
         setCpIdx(p=>(p+1)%players.length);setRoundEnded(false);
       },3000);
@@ -315,13 +365,15 @@ export default function MatchGame({ navigate, matchConfig, isTournament = false,
     confirmingRef.current=true;
     setTimeout(()=>{confirmingRef.current=false;},200);
     const ds=d||cDartsRef.current;const t=ds.reduce((s,x)=>s+(x?x.value:0),0);
+    const capturedCpIdx=cpIdx;const dartsInRound=ds.filter(Boolean).length;
     setRoundEnded(true);
     humanSwitchRef.current=setTimeout(()=>{
       humanSwitchRef.current=null;
-      setHistory(p=>[...p,{pi:cpIdx,darts:[...ds],sb:cs,bust:false}]);
-      setTotThrown(p=>{const n=[...p];n[cpIdx]+=t;return n;});
-      setRndCount(p=>{const n=[...p];n[cpIdx]++;return n;});
-      setScores(p=>{const n=[...p];n[cpIdx]-=t;return n;});
+      legDartsRef.current[capturedCpIdx]+=dartsInRound;
+      setHistory(p=>[...p,{pi:capturedCpIdx,darts:[...ds],sb:cs,bust:false}]);
+      setTotThrown(p=>{const n=[...p];n[capturedCpIdx]+=t;return n;});
+      setRndCount(p=>{const n=[...p];n[capturedCpIdx]++;return n;});
+      setScores(p=>{const n=[...p];n[capturedCpIdx]-=t;return n;});
       cDartsRef.current=[null,null,null];setCDarts([null,null,null]);
       setCpIdx(p=>(p+1)%players.length);setRoundEnded(false);
     },3000);

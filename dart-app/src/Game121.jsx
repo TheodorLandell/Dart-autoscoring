@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import useDartVision from "./useDartVision";
 import { LiveBoard } from "./LiveScoring";
 
@@ -66,7 +66,7 @@ function ScoreEditor({onSelect,onUndo,onClose}){
 }
 
 /* ============ MAIN 121 GAME — AUTO-SCORING ONLY ============ */
-export default function Game121({navigate}){
+export default function Game121({navigate, user = null}){
   const [level,setLevel]=useState(121);
   const [score,setScore]=useState(121);
   const [maxDarts,setMaxDarts]=useState(9);
@@ -80,6 +80,8 @@ export default function Game121({navigate}){
   const [settingDarts,setSettingDarts]=useState("9");
   const [settingLevel,setSettingLevel]=useState("121");
 
+  const legThrowsRef = useRef([]);
+
   const dartsLeft=maxDarts-dartsUsed;
   const checkout=useMemo(()=>getCheckout(score),[score]);
 
@@ -89,9 +91,28 @@ export default function Game121({navigate}){
     setUndoStack(p=>{const n=[...p,{level,score,dartsUsed,label}];if(n.length>15)n.shift();return n;});
   };
 
+  const saveLevel=(lvl, won)=>{
+    if(!user)return;
+    const token=localStorage.getItem("dart_token");
+    const throws=[...legThrowsRef.current];
+    legThrowsRef.current=[];
+    fetch("http://localhost:8000/api/user/match",{
+      method:"POST",
+      headers:{"Content-Type":"application/json","Authorization":`Bearer ${token}`},
+      body:JSON.stringify({
+        mode:"121",won,
+        result_str:`Level ${lvl}`,
+        checkout:won?lvl:0,
+        darts_in_leg:won?throws.length:0,
+        throws,
+      }),
+    }).catch(err=>console.error("121 stats save error:",err));
+  };
+
   const handleThrow=(di)=>{
     if(dartsUsed>=maxDarts)return;
     saveSnap(di.label);
+    legThrowsRef.current.push({zone:di.zone||di.label||"Miss",score:di.value??0,x_mm:di.x_mm??0,y_mm:di.y_mm??0});
 
     const newScore=score-di.value;
 
@@ -102,6 +123,7 @@ export default function Game121({navigate}){
       flash(`Checkade ut ${level}! Nivå ${newLevel} — kör!`,"good");
       setHistory(p=>[{level,success:true,ts:new Date().toLocaleTimeString("sv-SE",{hour:"2-digit",minute:"2-digit"})},...p].slice(0,15));
       if(newLevel>highestLevel)setHighestLevel(newLevel);
+      saveLevel(level,true);
       setLevel(newLevel);setScore(newLevel);setDartsUsed(0);setUndoStack([]);
       return;
     }
@@ -114,6 +136,7 @@ export default function Game121({navigate}){
         const newLevel=Math.max(2,level-1);
         flash(`Alla pilar slut — ner till nivå ${newLevel}`,"bad");
         setHistory(p=>[{level,success:false,ts:new Date().toLocaleTimeString("sv-SE",{hour:"2-digit",minute:"2-digit"})},...p].slice(0,15));
+        saveLevel(level,false);
         setLevel(newLevel);setScore(newLevel);setDartsUsed(0);setUndoStack([]);
       }
       return;
@@ -127,6 +150,7 @@ export default function Game121({navigate}){
       const newLevel=Math.max(2,level-1);
       flash(`Alla ${maxDarts} pilar utan checkout — ner till ${newLevel}`,"bad");
       setHistory(p=>[{level,success:false,ts:new Date().toLocaleTimeString("sv-SE",{hour:"2-digit",minute:"2-digit"})},...p].slice(0,15));
+      saveLevel(level,false);
       setTimeout(()=>{setLevel(newLevel);setScore(newLevel);setDartsUsed(0);setUndoStack([]);},300);
     }
   };

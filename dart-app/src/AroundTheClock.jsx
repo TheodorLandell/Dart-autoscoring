@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import useDartVision from "./useDartVision";
 import { LiveBoard } from "./LiveScoring";
 
@@ -97,7 +97,7 @@ function ATCSetup({onStart,navigate}){
 }
 
 /* ============ GAMEPLAY — AUTO-SCORING ONLY ============ */
-function ATCGame({config,navigate}){
+function ATCGame({config,navigate,user=null}){
   const{variant,finish,order}=config;
 
   /* Bygg nummerlista (en gång vid mount — random är OK i useState-initializer) */
@@ -115,6 +115,7 @@ function ATCGame({config,navigate}){
   const [msg,setMsg]=useState(null);
   const [completed,setCompleted]=useState(false);
   const [undoStack,setUndoStack]=useState([]);
+  const throwsRef=useRef([]);
 
   const currentTarget=numbers[currentIdx];
   const accuracy=totalDarts===0?0:Math.round((hits/totalDarts)*100);
@@ -138,6 +139,7 @@ function ATCGame({config,navigate}){
   const handleThrow=(dartInfo)=>{
     if(completed)return;
     setUndoStack(p=>[...p,{currentIdx,totalDarts,hits}]);
+    throwsRef.current.push({zone:dartInfo.zone||dartInfo.label||"Miss",score:dartInfo.value??0,x_mm:dartInfo.x_mm??0,y_mm:dartInfo.y_mm??0});
     const hit=isHit(dartInfo);
     setTotalDarts(d=>d+1);
 
@@ -160,6 +162,7 @@ function ATCGame({config,navigate}){
   const handleManualHit=()=>{
     if(completed)return;
     setUndoStack(p=>[...p,{currentIdx,totalDarts,hits}]);
+    throwsRef.current.push({zone:`S${currentTarget}`,score:currentTarget,x_mm:0,y_mm:0});
     setTotalDarts(d=>d+1);
     setHits(h=>h+1);
     if(currentIdx+1>=numbers.length){
@@ -186,6 +189,23 @@ function ATCGame({config,navigate}){
   useEffect(() => {
     resetBackend();
   }, [resetBackend]);
+
+  useEffect(()=>{
+    if(!completed||!user)return;
+    const pct=Math.round((hits/Math.max(totalDarts,1))*100);
+    const token=localStorage.getItem("dart_token");
+    fetch("http://localhost:8000/api/user/match",{
+      method:"POST",
+      headers:{"Content-Type":"application/json","Authorization":`Bearer ${token}`},
+      body:JSON.stringify({
+        mode:"atc",won:true,
+        result_str:`${pct}% träffsäkerhet`,
+        checkout:0,darts_in_leg:0,
+        throws:throwsRef.current,
+      }),
+    }).catch(err=>console.error("ATC stats save error:",err));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[completed]);
 
   const handleUndo=()=>{
     if(!undoStack.length)return;
@@ -362,12 +382,12 @@ function ATCGame({config,navigate}){
 }
 
 /* ============ MAIN — ROUTER ============ */
-export default function AroundTheClock({navigate}){
+export default function AroundTheClock({navigate,user=null}){
   const [phase,setPhase]=useState("setup");
   const [config,setConfig]=useState(null);
 
   if(phase==="game"&&config){
-    return<ATCGame config={config} navigate={navigate}/>;
+    return<ATCGame config={config} navigate={navigate} user={user}/>;
   }
   return<ATCSetup navigate={navigate} onStart={(cfg)=>{setConfig(cfg);setPhase("game");}}/>;
 }

@@ -22,7 +22,8 @@ async def websocket_scoring(ws: WebSocket):
     - type "throw": enstaka kast-event (för animation/ljud)
     """
     await ws.accept()
-    last_idx = 0
+    with state.lock:
+        last_idx = len(state.event_queue)
 
     try:
         while True:
@@ -62,7 +63,7 @@ async def reset_scores():
     with state.lock:
         if state.pipeline:
             state.pipeline.scoreboard = ScoreBoard()
-            state.pipeline.scored_positions.clear()
+            state.pipeline.scored_events.clear()
             state.pipeline.tracker.clear()
             state.pipeline.prev_confirmed_count = 0
             state.pipeline.stable_count = 0

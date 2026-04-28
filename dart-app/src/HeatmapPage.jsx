@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import HeatmapBoard from "./HeatmapBoard";
 
 /*
@@ -19,37 +19,8 @@ import HeatmapBoard from "./HeatmapBoard";
   └─────────────────────────────────────────────────────────────┘
 */
 
-/* Mock data — i produktion hämtas från backend */
-function generateMockDarts(count, bias) {
-  const cx = 200, cy = 200;
-  const darts = [];
-  for (let i = 0; i < count; i++) {
-    /* Cluster kring vissa områden för realistisk heatmap */
-    const angle = Math.random() * Math.PI * 2;
-    const dist = 40 + Math.random() * 110;
-    let x = cx + Math.cos(angle) * dist + (Math.random() - 0.5) * 30;
-    let y = cy + Math.sin(angle) * dist + (Math.random() - 0.5) * 30;
-
-    /* Bias mot T20 / T19 area */
-    if (bias && Math.random() > 0.5) {
-      const t20Angle = (-90) * (Math.PI / 180);
-      x = cx + Math.cos(t20Angle) * (95 + Math.random() * 10) + (Math.random() - 0.5) * 25;
-      y = cy + Math.sin(t20Angle) * (95 + Math.random() * 10) + (Math.random() - 0.5) * 25;
-    }
-
-    x = Math.max(30, Math.min(370, x));
-    y = Math.max(30, Math.min(370, y));
-    darts.push({ x, y });
-  }
-  return darts;
-}
-
-const MOCK_DATA = {
-  all: generateMockDarts(200, true),
-  match: generateMockDarts(120, true),
-  "121": generateMockDarts(50, false),
-  atc: generateMockDarts(30, false),
-};
+const MODES = ["all", "match", "121", "atc"];
+const EMPTY = { all: [], match: [], "121": [], atc: [] };
 
 function Opt({ label, count, selected, onClick }) {
   return (
@@ -66,10 +37,31 @@ function Opt({ label, count, selected, onClick }) {
   );
 }
 
-export default function HeatmapPage({ navigate }) {
+export default function HeatmapPage({ navigate, user }) {
   const [mode, setMode] = useState("all");
+  const [heatmapData, setHeatmapData] = useState(EMPTY);
 
-  const darts = MOCK_DATA[mode] || [];
+  useEffect(() => {
+    if (!user) return;
+    const token = localStorage.getItem("dart_token");
+    if (!token) return;
+    MODES.forEach(m => {
+      fetch(`http://localhost:8000/api/user/heatmap?mode=${m}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+        .then(r => r.json())
+        .then(data => {
+          const pts = (data.darts || []).map(d => ({
+            x: 200 + d.x_mm,
+            y: 200 - d.y_mm,
+          }));
+          setHeatmapData(prev => ({ ...prev, [m]: pts }));
+        })
+        .catch(() => {});
+    });
+  }, [user?.id]);
+
+  const darts = heatmapData[mode] || [];
 
   /* Mest träffade segment (mock) */
   const topSegments = useMemo(() => {
@@ -107,10 +99,10 @@ export default function HeatmapPage({ navigate }) {
 
         {/* Mode filter */}
         <div className="flex gap-2 w-full max-w-md mb-6">
-          <Opt label="Alla" count={MOCK_DATA.all.length} selected={mode === "all"} onClick={() => setMode("all")} />
-          <Opt label="Match" count={MOCK_DATA.match.length} selected={mode === "match"} onClick={() => setMode("match")} />
-          <Opt label="121" count={MOCK_DATA["121"].length} selected={mode === "121"} onClick={() => setMode("121")} />
-          <Opt label="ATC" count={MOCK_DATA.atc.length} selected={mode === "atc"} onClick={() => setMode("atc")} />
+          <Opt label="Alla" count={heatmapData.all.length} selected={mode === "all"} onClick={() => setMode("all")} />
+          <Opt label="Match" count={heatmapData.match.length} selected={mode === "match"} onClick={() => setMode("match")} />
+          <Opt label="121" count={heatmapData["121"].length} selected={mode === "121"} onClick={() => setMode("121")} />
+          <Opt label="ATC" count={heatmapData.atc.length} selected={mode === "atc"} onClick={() => setMode("atc")} />
         </div>
 
         {/* Heatmap */}

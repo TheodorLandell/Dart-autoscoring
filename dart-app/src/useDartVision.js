@@ -29,7 +29,7 @@ export default function useDartVision({ onThrow, enabled = false }) {
 
   const onThrowRef = useRef(onThrow);
   const readyRef = useRef(false);
-  const connectedAtRef = useRef(0);
+  const processedThrowCountRef = useRef(0);
 
   /* Synka onThrow-ref via effect (inte under render) */
   useEffect(() => { onThrowRef.current = onThrow; }, [onThrow]);
@@ -51,7 +51,6 @@ export default function useDartVision({ onThrow, enabled = false }) {
       ws.onopen = () => {
         if (disposed) { ws.close(); return; }
         setWsConnected(true);
-        connectedAtRef.current = Date.now();
         readyRef.current = false;
         reconnectAttempt = 0;
         console.log("🎯 DartVision WS ansluten");
@@ -80,14 +79,32 @@ export default function useDartVision({ onThrow, enabled = false }) {
 
           if (data.type === "state") {
             setWsDarts(data.darts || []);
-            if (!readyRef.current) readyRef.current = true;
+            const serverThrows = data.throws || [];
+            if (!readyRef.current) {
+              // Första state efter connect/reconnect — synka räknaren utan att trigga onThrow
+              processedThrowCountRef.current = serverThrows.length;
+              readyRef.current = true;
+            } else if (serverThrows.length > processedThrowCountRef.current) {
+              // Återhämta kast som registrerades medan WS var nere
+              for (const t of serverThrows.slice(processedThrowCountRef.current)) {
+                const dartInfo = parseThrow(t.zone, t.score);
+                dartInfo.is_edge = t.is_edge;
+                dartInfo.cam = t.cam;
+                dartInfo.x_mm = t.x_mm ?? 0;
+                dartInfo.y_mm = t.y_mm ?? 0;
+                onThrowRef.current?.(dartInfo);
+              }
+              processedThrowCountRef.current = serverThrows.length;
+            }
           }
 
           if (data.type === "throw" && readyRef.current) {
-            if (Date.now() - connectedAtRef.current < 500) return;
+            processedThrowCountRef.current++;
             const dartInfo = parseThrow(data.zone, data.score);
             dartInfo.is_edge = data.is_edge;
             dartInfo.cam = data.cam;
+            dartInfo.x_mm = data.x_mm ?? 0;
+            dartInfo.y_mm = data.y_mm ?? 0;
             onThrowRef.current?.(dartInfo);
           }
 
@@ -120,7 +137,7 @@ export default function useDartVision({ onThrow, enabled = false }) {
     try {
       await fetch(`${API_BASE}/api/reset`, { method: "POST" });
       readyRef.current = false;
-      connectedAtRef.current = Date.now();
+      processedThrowCountRef.current = 0;
     } catch (err) {
       console.error("DartVision reset error:", err);
     }
