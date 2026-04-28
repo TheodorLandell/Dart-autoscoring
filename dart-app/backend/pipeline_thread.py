@@ -56,7 +56,7 @@ def run_pipeline(
         conf=conf,
         tip_offset=tip_offset,
     )
-
+ 
     with state.lock:
         state.running = True
         state.camera_ok = True

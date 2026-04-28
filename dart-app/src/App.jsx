@@ -129,7 +129,7 @@ export default function App() {
       />
     )
   }
-
+ 
   if (page === "tournament") return <TournamentSetup navigate={navigate} user={user} />
   if (page === "tournament-bracket" && tournamentConfig) {
     return (
