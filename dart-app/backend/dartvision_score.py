@@ -678,48 +678,70 @@ class DartVisionPipeline:
 
         # ---- Kolla om nya pilar att registrera ----
         if current_count > self.prev_confirmed_count:
-            print(f"\n  [NY PIL] {current_count} bekräftade tracks (var {self.prev_confirmed_count}):")
+            new_dart_count = current_count - self.prev_confirmed_count
+            print(f"\n  [NY PIL] {current_count} tracks bekräftade (var {self.prev_confirmed_count}), "
+                  f"förväntar {new_dart_count} ny/nya:")
             for track in confirmed_tracks:
                 r_debug = math.sqrt(track.smooth_x**2 + track.smooth_y**2)
                 zi_debug = score_from_mm(track.smooth_x, track.smooth_y)
                 print(f"    id={track.id} zone={zi_debug[0]} r={r_debug:.0f}mm "
                       f"pos=({track.smooth_x:.1f},{track.smooth_y:.1f})mm "
-                      f"conf={track.conf:.2f} scored={track.scored}")
+                      f"conf={track.conf:.2f} cam={track.cam} scored={track.scored}")
 
-            cycle_new = [t for t in confirmed_tracks
-                         if not t.scored and t.conf >= CONF_SCORE_MIN]
-
+            # Steg 1: Samla kandidater — oskorade tracks med god conf
+            candidates = []
             for track in confirmed_tracks:
                 if track.scored:
                     continue
                 if track.conf < CONF_SCORE_MIN:
                     print(f"    → id={track.id} HOPPAS ÖVER (conf={track.conf:.2f} < {CONF_SCORE_MIN})")
                     continue
-                # Temporal dedup: blockera duplikat (kors-kamera eller YOLO multi-bbox)
-                # som bekräftas kort efter ett redan registrerat kast på samma plats
+                # Temporal dedup: blockera kors-kamera-duplikat av TIDIGARE pilar
                 pos = (track.smooth_x, track.smooth_y)
                 if any(dist_mm(pos, (x, y)) < SCORED_DEDUP_MM
                        for x, y, _ in self.scored_events):
-                    print(f"    → id={track.id} TEMP-DEDUP — nära nyligen registrerad position")
-                    track.scored = True  # markera så att tracken inte testas igen
+                    print(f"    → id={track.id} TEMP-DEDUP (nära tidigare registrerad position)")
+                    track.scored = True
                     continue
+                candidates.append(track)
+
+            # Steg 2: Sortera på conf (bäst först); begränsa till new_dart_count.
+            # Detta är det primära skyddet mot kors-kamera-duplikat: om count ökar
+            # med 1 men BÅDA kamerornas tracks bekräftas denna cykel, scoreas bara
+            # den med högst conf — oavsett positionsavstånd.
+            candidates.sort(key=lambda t: -t.conf)
+
+            scored_this_cycle = []
+            for track in candidates:
+                if len(scored_this_cycle) >= new_dart_count:
+                    track.scored = True
+                    print(f"    → id={track.id} RÄKNAR-DEDUP (max {new_dart_count} ny/cykel, "
+                          f"cam={track.cam}, conf={track.conf:.2f})")
+                    continue
+
                 zone, score, mult, sector, r_mm, angle, is_edge = \
                     score_from_mm(track.smooth_x, track.smooth_y)
-                # MISS-suppression: om annan kamera har en giltig träff i denna cykel → undertryck
+
+                # MISS-suppression: undertryck om annan kamera scorar giltig träff denna cykel
                 if zone == "MISS":
-                    other_valid = [
+                    other_cams_valid = [
                         score_from_mm(t.smooth_x, t.smooth_y)[0]
-                        for t in cycle_new
-                        if t is not track and t.cam != track.cam and not t.scored
+                        for t in candidates
+                        if t is not track and t.cam != track.cam
                     ]
-                    if any(z != "MISS" for z in other_valid):
+                    if any(z != "MISS" for z in other_cams_valid):
                         track.scored = True
-                        print(f"    → id={track.id} MISS UNDERTRYCKT (annan kamera: {other_valid})")
+                        print(f"    → id={track.id} MISS UNDERTRYCKT "
+                              f"(annan kamera: {other_cams_valid})")
                         continue
-                self.scoreboard.add_throw(zone, score, is_edge, track.cam, track.smooth_x, track.smooth_y)
+
+                self.scoreboard.add_throw(zone, score, is_edge, track.cam,
+                                          track.smooth_x, track.smooth_y)
                 track.scored = True
-                self.scored_events.append([track.smooth_x, track.smooth_y, time.time() + SCORED_DEDUP_SECS])
-                print(f"  KAST: {zone} = {score} ({track.cam}) "
+                scored_this_cycle.append(track)
+                self.scored_events.append([track.smooth_x, track.smooth_y,
+                                           time.time() + SCORED_DEDUP_SECS])
+                print(f"  ✓ KAST: {zone} = {score} (cam={track.cam}) "
                       f"[r={r_mm:.0f}mm, conf={track.conf:.2f}, hits={track.hits}]")
 
             self.prev_confirmed_count = current_count
