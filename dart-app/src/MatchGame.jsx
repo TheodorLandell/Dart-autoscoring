@@ -300,6 +300,34 @@ export default function MatchGame({ navigate, matchConfig, isTournament = false,
     }).catch(err => console.error("Stats save error:", err));
   };
 
+  const saveThrowsOnly = () => {
+    if (!user) return;
+    const humanIdx = players.findIndex(p => p.type !== "bot");
+    if (humanIdx < 0) return;
+    const histThrows = history
+      .filter(h => h.pi === humanIdx)
+      .flatMap(h => (h.darts || []).filter(Boolean).map(d => ({
+        zone: d.zone || d.label || "Miss",
+        score: d.value ?? 0,
+        x_mm: d.x_mm ?? 0,
+        y_mm: d.y_mm ?? 0,
+      })));
+    const curThrows = cDartsRef.current.filter(Boolean).map(d => ({
+      zone: d.zone || d.label || "Miss",
+      score: d.value ?? 0,
+      x_mm: d.x_mm ?? 0,
+      y_mm: d.y_mm ?? 0,
+    }));
+    const allThrows = [...histThrows, ...curThrows];
+    if (allThrows.length === 0) return;
+    const token = localStorage.getItem("dart_token");
+    fetch("http://localhost:8000/api/user/throws", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+      body: JSON.stringify({ mode: String(startingScore), throws: allThrows }),
+    }).catch(err => console.error("Throws save error:", err));
+  };
+
   const applyDart=(di)=>{
     if(roundEnded)return;
     const cur=cDartsRef.current;
@@ -472,7 +500,7 @@ export default function MatchGame({ navigate, matchConfig, isTournament = false,
 
       {/* Header */}
       <header className="relative z-10 flex items-center justify-between px-6 py-3" style={{borderBottom:"1px solid rgba(255,255,255,0.05)"}}>
-        <button onClick={()=>isTournament?handleAbortTournamentMatch():navigate("lobby")} className="flex items-center gap-2 transition-colors duration-200" style={{color:"rgba(255,255,255,0.4)"}}
+        <button onClick={()=>{if(!isTournament)saveThrowsOnly();isTournament?handleAbortTournamentMatch():navigate("lobby");}} className="flex items-center gap-2 transition-colors duration-200" style={{color:"rgba(255,255,255,0.4)"}}
           onMouseEnter={(e)=>e.currentTarget.style.color="rgba(255,255,255,0.8)"} onMouseLeave={(e)=>e.currentTarget.style.color="rgba(255,255,255,0.4)"}>
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M10 2L4 8l6 6"/></svg>
           <span className="text-xs font-semibold uppercase tracking-widest">Avbryt</span>

@@ -121,6 +121,32 @@ async def save_match(request: Request, authorization: str | None = Header(None))
         db.close()
 
 
+@router.post("/user/throws")
+async def save_throws(request: Request, authorization: str | None = Header(None)):
+    """Spara enbart kast utan matchresultat (t.ex. vid avbruten match)."""
+    payload = get_current_user(authorization)
+    if not payload:
+        return JSONResponse({"error": "Ej inloggad"}, status_code=401)
+
+    user_id = payload["user_id"]
+    body = await request.json()
+    mode = str(body.get("mode", ""))
+    throws = body.get("throws", [])
+
+    db = get_db()
+    try:
+        for t in throws:
+            db.execute(
+                "INSERT INTO throws (user_id, zone, score, x_mm, y_mm, mode) VALUES (?,?,?,?,?,?)",
+                (user_id, str(t.get("zone", "")), int(t.get("score", 0)),
+                 float(t.get("x_mm", 0)), float(t.get("y_mm", 0)), mode)
+            )
+        db.commit()
+        return JSONResponse({"status": "ok"})
+    finally:
+        db.close()
+
+
 @router.get("/user/matches")
 async def get_matches(limit: int = 10, authorization: str | None = Header(None)):
     """Hämta senaste matcher för inloggad spelare."""
